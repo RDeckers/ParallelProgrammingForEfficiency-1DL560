@@ -2,7 +2,9 @@
 *.dll
 *.xml
 *.vsp
-lab_01/c_encoder/ppe*
+lab_01/c_encoder/ppe/ppe.*
+lab_01/c_encoder/ppe.*
+lab_01/c_encoder/ppe/Debug/*
 lab_01/c_encoder/ppe/Release/*
 lab_01/c_encoder/extlibs/*
 lab_01/c_encoder/Release/*

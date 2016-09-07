@@ -12,11 +12,16 @@ float max(float a, float b);
 #include <immintrin.h>
 
 class Channel{
+private:
+	
+	//int padded_width;
+	//int padded_height;
 public:
+	//TODO: these are padded to optimize blocking, make sure that is what we want everywhere.
+	int width;
+	int height;
 	float* data;
 	//std::vector<float> *data;
-	int width;
-    int height;
 
 	Channel(int _width, int _height);
 
@@ -25,6 +30,24 @@ public:
 	~Channel();
 	//void operator=(Channel* c);
 	void copy(Channel* c);
+	inline float& get_ref(int x, int y) {
+		return ((float*)data)[y*width + x];
+	}
+	inline float get(int x, int y) {
+		return ((float*)data)[y*width + x];
+	}
+	inline void set(int x, int y, float value) {
+		((float*)data)[y*width + x] = value;
+	}
+	inline float& get_ref(int i) {
+		return ((float*)data)[i];
+	}
+	inline float get(int i) {
+		return ((float*)data)[i];
+	}
+	inline void set(int i, float value) {
+		((float*)data)[i] = value;
+	}
 }; 
 
 
