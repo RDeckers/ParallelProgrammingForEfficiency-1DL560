@@ -12,9 +12,12 @@
 #include <vector>
 #include "gettimeofday.h"
 #include "config.h"
+#include "bench.h"
 
 using namespace std;
-
+#define OPTIM
+//can be optimized by saving bytes instead of floats and converting dynamically.
+//also should load next frame async in the background.
 void loadImage(int number, string path, Image** photo) {
     string filename;
     TIFFRGBAImage img;
@@ -44,9 +47,9 @@ void loadImage(int number, string path, Image** photo) {
     for (int j=0; j<(int)w; j++) {
         for (int i=0; i<(int)h; i++) {
             // The inversion is ON PURPOSE
-            (*photo)->rc->data[(h-1-i)*w+j] = (float)TIFFGetR(raster[i*w+j]);
-            (*photo)->gc->data[(h-1-i)*w+j] = (float)TIFFGetG(raster[i*w+j]);
-            (*photo)->bc->data[(h-1-i)*w+j] = (float)TIFFGetB(raster[i*w+j]);
+            (*photo)->rc->set(j, h - 1 - i, (float)TIFFGetR(raster[i*w+j]));
+			(*photo)->gc->set(j, h - 1 - i, (float)TIFFGetG(raster[i*w + j]));
+			(*photo)->bc->set(j, h - 1 - i, (float)TIFFGetB(raster[i*w + j]));
         }
     }
 
@@ -56,6 +59,24 @@ void loadImage(int number, string path, Image** photo) {
 
 }
 
+void convertRGBtoYCbCr_inplace(Image* in) {
+	int width = in->width;
+	int height = in->height;
+
+	for (int y = 0; y<height; y++) {
+		for (int x = 0; x<width; x++) {
+			float R = in->rc->get(x, y);
+			float G = in->gc->get(x, y);
+			float B = in->bc->get(x, y);
+			float Y = 0 + ((float)0.299*R) + ((float)0.587*G) + ((float)0.113*B);
+			float Cb = 128 - ((float)0.168736*R) - ((float)0.331264*G) + ((float)0.5*B);
+			float Cr = 128 + ((float)0.5*R) - ((float)0.418688*G) - ((float)0.081312*B);
+			in->rc->set(x, y, Y);
+			in->gc->set(x, y, Cb);
+			in->bc->set(x, y, Cr);
+		}
+	}
+}
 
 void convertRGBtoYCbCr(Image* in, Image* out){
     int width = in->width;
@@ -64,21 +85,109 @@ void convertRGBtoYCbCr(Image* in, Image* out){
 		for(int y=0; y<width; y++) {
 			for (int x = 0; x<height; x++) {
 
-			float R = in->rc->data[x*width+y];
-			float G = in->gc->data[x*width+y];
-			float B = in->bc->data[x*width+y];
+			float R = in->rc->get(y,x);
+			float G = in->gc->get(y,x);
+			float B = in->bc->get(y,x);
 			float Y = 0+((float)0.299*R)+((float)0.587*G)+((float)0.113*B);
 			float Cb = 128-((float)0.168736*R)-((float)0.331264*G)+((float)0.5*B);
             float Cr = 128+((float)0.5*R)-((float)0.418688*G)-((float)0.081312*B);
-			out->rc->data[x*width+y] = Y;
-			out->gc->data[x*width+y] = Cb;
-			out->bc->data[x*width+y] = Cr;
+			out->rc->get_ref(y,x) = Y;
+			out->gc->get_ref(y,x) = Cb;
+			out->bc->get_ref(y,x) = Cr;
         }
     }
 
     //return out;
 }
-
+//
+//Channel* lowPass(Channel* in, Channel* out) {
+//	// Applies a simple 3-tap low-pass filter in the X- and Y- dimensions.
+//	// E.g., blur
+//	// weights for neighboring pixels
+//	float a = 0.25;
+//	float b = 0.5;
+//	float c = 0.25;
+//
+//	int width = in->width;
+//	int height = in->height;
+//
+//	out->copy(in);
+//
+//	const int block_size = 8;
+//
+//	const int block_x = (width-2) / block_size;
+//	const int block_x_rem = (width-2) % block_size;
+//
+//	const int block_y = (height-2) / block_size;
+//	const int block_y_rem = (height-2) % block_size;
+//
+//	float block_buff[(block_size+1)*(block_size+1)];
+//
+//
+//	for (int by = 0; by < block_y; by++) {
+//		for (int bx = 0; bx < block_x; bx++) {
+//			for (int y = 0; y < block_size+1; y++) {
+//				for (int x = 0; x < block_size+1; x++) {
+//					block_buff[y*block_size + x] = in->get(x + bx*block_size, y + by*block_size);
+//				}
+//			}
+//			//horizonatal blur
+//			float prev = block_buff[block_size + 1];
+//			float current = block_buff[block_size + 2];
+//			for (int y = 1; y < block_size; y++) {
+//				for (int x = 1; x < block_size; x++) {
+//					float next = block_buff[y*block_size + x+1];
+//					block_buff[y*block_size + x] = a*prev + b*current + c*next;
+//					prev = current;
+//					current = next;
+//				}
+//			}
+//			//vertical blur
+//			prev = block_buff[1];
+//			current = block_buff[block_size + 2];
+//			for (int y = 1; y < block_size; y++) {
+//				for (int x = 1; x < block_size; x++) {
+//					float next = block_buff[(y+1)*block_size + x];
+//					block_buff[y*block_size + x] = a*prev + b*current + c*next;
+//					prev = current;
+//					current = next;
+//				}
+//			}
+//
+//			//WB
+//			for (int y = 0; y < block_size; y++) {
+//				for (int x = 0; x < block_size; x++) {
+//					in->set(x + bx*block_size, y + by*block_size, block_buff[(y+1)*block_size + x + 1]);
+//				}
+//			}
+//		}
+//		//TODO: pad with to be multiple of 8.
+//		return out;
+//	}
+//
+//	//for (int y = 1; y < height - 1; y++) {
+//	//	for (int x = 1; x < width - 1; x++) {
+//	//		float c = in->get 
+//	//		out->set(x,y )
+//	//	}
+//	//}
+//
+//	// In X
+//	//for (int y = 1; y<(height - 1); y++) {
+//	//	for (int x = 1; x<(width - 1); x++) {
+//	//		out->set(x, y, a*in->get(x - 1, y) + b*in->get(x, y) + c*in->get(x + 1, y));
+//	//	}
+//	//}
+//	//// In Y
+//	//for (int y = 1; y<(height - 1); y++) {
+//	//	for (int x = 1; x<(width - 1); x++) {
+//	//		out->set(x, y, a*in->get(x, y - 1) + b*in->get(x, y) + c*in->get(x, y + 1));
+//	//	}
+//	//}
+//
+//	//return out;
+//}
+//
 Channel* lowPass(Channel* in, Channel* out){
     // Applies a simple 3-tap low-pass filter in the X- and Y- dimensions.
     // E.g., blur
@@ -91,19 +200,19 @@ Channel* lowPass(Channel* in, Channel* out){
 	int height = in->height;
 
     //out = in; TODO Is this necessary?
-	for(int i=0; i<width*height; i++) out->data[i] =in->data[i];
+	out->copy(in);
 
 
     // In X
     for (int y=1; y<(width-1); y++) {
         for (int x=1; x<(height-1); x++) {
-            out->data[x*width+y] = a*in->data[(x-1)*width+y]+b*in->data[x*width+y]+c*in->data[(x+1)*width+y];
+            out->get_ref(y,x) = a*in->get(y,x-1)+b*in->get(y,x)+c*in->get(y, x+1);
         }
     }
     // In Y
     for (int y=1; y<(width-1); y++) {
         for (int x=1; x<(height-1); x++) {
-            out->data[x*width+y] = a*out->data[x*width+(y-1)]+b*out->data[x*width+y]+c*out->data[x*width+(y+1)];
+			out->get_ref(y, x) = a*out->get(y-1, x) + b*out->get(y, x) + c*out->get(y+1, x);
         }
     }
 
@@ -142,9 +251,9 @@ std::vector<mVector>* motionVectorSearch(Frame* source, Frame* match, int width,
                             int match_y = my+y;
                             int search_x = sx+x;
                             int search_y = sy+y;
-                            float diff_Y = abs(match->Y->data[match_x*width+match_y] - source->Y->data[search_x*width+search_y]);
-                            float diff_Cb = abs(match->Cb->data[match_x*width+match_y] - source->Cb->data[search_x*width+search_y]);
-                            float diff_Cr = abs(match->Cr->data[match_x*width+match_y] - source->Cr->data[search_x*width+search_y]);
+                            float diff_Y = abs(match->Y->get(match_y, match_x) - source->Y->get(search_y, search_x));
+							float diff_Cb = abs(match->Cb->get(match_y, match_x) - source->Cb->get(search_y, search_x));
+							float diff_Cr = abs(match->Cr->get(match_y, match_x) - source->Cr->get(search_y, search_x));
 
                             float diff_total = Y_weight*diff_Y + Cb_weight*diff_Cb + Cr_weight*diff_Cr;
                             current_match_sad = current_match_sad + diff_total;
@@ -197,9 +306,9 @@ Frame* computeDelta(Frame* i_frame_ycbcr, Frame* p_frame_ycbcr, std::vector<mVec
                     int src_y = my+vector[1]+y;
                     int dst_x = mx+x;
                     int dst_y = my+y;
-                    delta->Y->data[dst_x*width+dst_y] = delta->Y->data[dst_x*width+dst_y] - i_frame_ycbcr->Y->data[src_x*width+src_y];
-                    delta->Cb->data[dst_x*width+dst_y] = delta->Cb->data[dst_x*width+dst_y] - i_frame_ycbcr->Cb->data[src_x*width+src_y];
-                    delta->Cr->data[dst_x*width+dst_y] = delta->Cr->data[dst_x*width+dst_y] - i_frame_ycbcr->Cr->data[src_x*width+src_y];
+					delta->Y->get_ref(dst_y, dst_x) -= i_frame_ycbcr->Y->get(src_y, src_x);
+					delta->Cb->get_ref(dst_y, dst_x) -= i_frame_ycbcr->Cb->get(src_y, src_x);
+					delta->Cr->get_ref(dst_y, dst_x) -= i_frame_ycbcr->Cr->get(src_y, src_x);
                 }
             }
 
@@ -210,40 +319,58 @@ Frame* computeDelta(Frame* i_frame_ycbcr, Frame* p_frame_ycbcr, std::vector<mVec
 }
 
 
+#ifndef OPTIM
 Channel* downSample(Channel* in){
 	int width = in->width;
 	int height = in->height;
-	int w2=width/2;
-	int h2=height/2;
 
-	Channel* out = new Channel((width/2),(height/2));
-
-		for(int y2=0,y=0; y2<w2; y2++) {
-			for (int x2 = 0, x = 0; x2<h2; x2++) {
-
-            out->data[x2*w2+y2]= in->data[x*width+y];
-            x+=2;
-        }
-        y+=2;
+	Channel* out = new Channel(width/2,height/2);
+	int w2 = out->width;
+	int h2 = out->height;
+	for(int y2=0,y=0; y2<w2; y2++) {
+		for (int x2 = 0, x = 0; x2<h2; x2++) {
+           out->set(y2, x2, in->get(y,x));
+           x+=2;
+       }
+      y+=2;
     }
-
     return out;
 }
+#else
+Channel* downSample(Channel* in) {
+	int width = in->width;
+	int height = in->height;
 
+	Channel* out = new Channel(width / 2, height / 2);
+	int w2 = out->width;
+	int h2 = out->height;
+	for (int y2 = 0, y = 0; y2<h2; y2++) {
+		for (int x2 = 0, x = 0; x2<w2; x2++) {
+			out->set(x2, y2, in->get(x, y));
+			x += 2;
+		}
+		y += 2;
+	}
+	return out;
+}
+#endif
 
 void dct8x8(Channel* in, Channel* out){
 	int width = in->width;
 	int height = in -> height;
 
     // 8x8 block dct on each block
-    for(int i=0; i<width*height; i++) {
-        in->data[i] -= 128;
-        out->data[i] = 0; //zeros
-    }
+	for (int i = 0; i < height; i++) {
+		for (int j = 0; j < width; j++) {
+			in->get_ref(j, i) -= 128;
+			out->get_ref(j, i) = 0;
+		}
+	}
 
     for(int y=0; y<width; y+=8) {
         for(int x=0; x<height; x+=8) {
-            dct8x8_block(&(in->data[x*width+y]),&(out->data[x*width+y]), width);
+			dct8x8_block(&(in->data[x*width + y]), &(out->data[x*width + y]), width);
+            //dct8x8_block(&(in->get_ref(y, x)),&(out->get_ref(y, x)), width);
         }
     }
 }
@@ -274,13 +401,13 @@ void quant8x8(Channel* in, Channel* out) {
 	int width = in->width;
 	int height = in->height;
 
-    for(int i=0; i<width*height; i++) {
-        out->data[i]=0; //zeros
-    }
+	for (int i = 0; i<width*height; i++) {
+		out->set(i,0); //zeros
+	}
 
     for (int y=0; y<width; y+=8) {
         for (int x=0; x<height; x+=8) {
-            round_block(&(in->data[x*width+y]), &(out->data[x*width+y]), width);
+            round_block(&(in->data[x*width + y]), &(out->data[x*width + y]), width);
         }
     }
 }
@@ -291,14 +418,12 @@ void dcDiff(Channel* in, Channel* out) {
 	int height = in->height;
 
     int number_of_dc = width*height/64;
-	double* dc_values_transposed = new double[number_of_dc];
     double* dc_values = new double[number_of_dc];
 
     int iter = 0;
     for(int j=0; j<width; j+=8){
         for(int i=0; i<height; i+=8) {
-            dc_values_transposed[iter] = in->data[i*width+j];
-            dc_values[iter] = in->data[i*width+j];
+            dc_values[iter] = in->get(j,i);
             iter++;
         }
     }
@@ -306,25 +431,24 @@ void dcDiff(Channel* in, Channel* out) {
     int new_w = (int) max((float)(width/8), 1);
     int new_h = (int) max((float)(height/8), 1);
 
-    out->data[0] = (float)dc_values[0];
+    out->get_ref(0) = (float)dc_values[0];
 
     double prev = 0.;
     iter = 0;
     for (int j=0; j<new_w; j++) {
         for (int i=0; i<new_h; i++) {
-            out->data[iter]= (float)(dc_values[i*new_w+j] - prev);
+            out->get_ref(iter) = (float)(dc_values[i*new_w+j] - prev);
             prev = dc_values[i*new_w+j];
             iter++;
         }
     }
-	delete dc_values_transposed;
 	delete dc_values;
 
 }
 
 void cpyBlock(float* in, float* out, int blocksize, int stride) {
-    for (int j=0; j<blocksize; j++) {
-        for (int i=0; i<blocksize; i++) {
+	for (int i = 0; i<blocksize; i++){
+		for (int j=0; j<blocksize; j++) {
             out[i*blocksize+j] = in[i*stride+j];
         }
     }
@@ -343,14 +467,10 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
     for(int x=0; x<height; x+=8) {
         for(int y=0; y<width; y+=8) {
-             cpyBlock(&(in->data[x*width+y]), _block, 8, width); //block = in(x:x+7,y:y+7);
+			cpyBlock(&(in->data[x*width+y]), _block, 8, width); //block = in(x:x+7,y:y+7);
             //Put the coefficients in zig-zag order
-            float zigZagOrdered[MPEG_CONSTANT] = { 0 };
-            for (int index=0; index < MPEG_CONSTANT; index++){
-                zigZagOrdered[index] = _block[zigZagIndex[index]];
-            }
             for (int i=0; i<MPEG_CONSTANT; i++)
-                ordered->data[blockNumber*MPEG_CONSTANT+i] = zigZagOrdered[i];
+                ordered->set(blockNumber*MPEG_CONSTANT + i, _block[zigZagIndex[i]]);//converst a block, zigzagged, into a line of 64
             blockNumber++;
         }
     }
@@ -358,7 +478,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
 
 void encode8x8(Channel* ordered, SMatrix* encoded){
-	int width = encoded->height;
+	int width = encoded->height;//dafuq?
 	int height = encoded->width;
     int num_blocks = height;
 
@@ -369,7 +489,8 @@ void encode8x8(Channel* ordered, SMatrix* encoded){
         }
 
 		double* block = new double[width];
-        for(int y=0; y<width; y++) block[y] = ordered->data[i*width+y];
+        for(int y=0; y<width; y++)
+			block[y] = ordered->get(y,i);
         int num_coeff = MPEG_CONSTANT; //width
         int encoded_index = 0;
         int in_zero_run = 0;
@@ -420,7 +541,8 @@ void encode8x8(Channel* ordered, SMatrix* encoded){
 int encode() {
     int end_frame = int(N_FRAMES);
     int i_frame_frequency = int(I_FRAME_FREQ);
-	struct timeval starttime, endtime;
+	//struct timeval starttime, endtime;
+	struct timespec clock;
 	double runtime[10] = {0};
 
     // Hardcoded paths
@@ -452,19 +574,23 @@ int encode() {
         //  Convert to YCbCr
 		print("Covert to YCbCr...");
 
-		Image* frame_ycbcr = new Image(width, height, FULLSIZE);
-		gettimeofday(&starttime, NULL);
-		convertRGBtoYCbCr(frame_rgb, frame_ycbcr);
-		gettimeofday(&endtime, NULL);
-		runtime[0] = double(endtime.tv_sec)*1000.0f + double(endtime.tv_usec)/1000.0f - double(starttime.tv_sec)*1000.0f - double(starttime.tv_usec)/1000.0f; //in ms
-
+		
+		//Image* frame_ycbcr = new Image(width, height, FULLSIZE);
+		tick(&clock);
+		//convertRGBtoYCbCr(frame_rgb, frame_ycbcr);
+		convertRGBtoYCbCr_inplace(frame_rgb);
+		
+		runtime[0] = tock(&clock);
+		Image* frame_ycbcr = frame_rgb;
+		frame_rgb = nullptr;
 		dump_image(frame_ycbcr, "frame_ycbcr", frame_number);
-		delete frame_rgb;
+		//delete frame_rgb;
 
         // We low pass filter Cb and Cr channesl
         print("Low pass filter...");
 
-		gettimeofday(&starttime, NULL);
+		//TODO: split up channels for better memory locality.
+		tick(&clock);
 		Channel* frame_blur_cb = new Channel(width, height);
         Channel* frame_blur_cr = new Channel(width, height);
 		Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
@@ -475,8 +601,8 @@ int encode() {
 		frame_lowpassed->Y->copy(frame_ycbcr->rc);
 		frame_lowpassed->Cb->copy(frame_blur_cb);
         frame_lowpassed->Cr->copy(frame_blur_cr);
-		gettimeofday(&endtime, NULL);
-		runtime[1] = double(endtime.tv_sec)*1000.0f + double(endtime.tv_usec)/1000.0f - double(starttime.tv_sec)*1000.0f - double(starttime.tv_usec)/1000.0f; //in ms
+		runtime[1] = tock(&clock);
+		
 
 		dump_frame(frame_lowpassed, "frame_ycbcr_lowpass", frame_number);
 		delete frame_ycbcr;
@@ -492,16 +618,14 @@ int encode() {
 			//Compute the motion vectors
 			print("Motion Vector Search...");
 
-			gettimeofday(&starttime, NULL);
+			tick(&clock);
             motion_vectors = motionVectorSearch(previous_frame_lowpassed, frame_lowpassed, frame_lowpassed->width, frame_lowpassed->height);
-            gettimeofday(&endtime, NULL);
-			runtime[2] = double(endtime.tv_sec)*1000.0f + double(endtime.tv_usec)/1000.0f - double(starttime.tv_sec)*1000.0f - double(starttime.tv_usec)/1000.0f; //in ms
+			runtime[2] =  tock(&clock);
 
 			print("Compute Delta...");
-			gettimeofday(&starttime, NULL);
+			tick(&clock);
             frame_lowpassed_final = computeDelta(previous_frame_lowpassed, frame_lowpassed, motion_vectors);
-			gettimeofday(&endtime, NULL);
-			runtime[3] = double(endtime.tv_sec)*1000.0f + double(endtime.tv_usec)/1000.0f - double(starttime.tv_sec)*1000.0f - double(starttime.tv_usec)/1000.0f; //in ms
+			runtime[3] = tock(&clock);
 
         } else {
             // We have a I frame
@@ -517,7 +641,7 @@ int encode() {
         // Downsample the difference
 		print("Downsample...");
 
-		gettimeofday(&starttime, NULL);
+		tick(&clock);
         Frame* frame_downsampled = new Frame(width, height, DOWNSAMPLE);
 
         // We don't touch the Y frame
@@ -526,8 +650,8 @@ int encode() {
 		frame_downsampled->Cb->copy(frame_downsampled_cb);
         Channel* frame_downsampled_cr = downSample(frame_lowpassed_final->Cr);
 		frame_downsampled->Cr->copy(frame_downsampled_cr);
-        gettimeofday(&endtime, NULL);
-		runtime[4] = double(endtime.tv_sec)*1000.0f + double(endtime.tv_usec)/1000.0f - double(starttime.tv_sec)*1000.0f - double(starttime.tv_usec)/1000.0f; //in ms
+  
+		runtime[4] = tock(&clock);
 
         dump_frame(frame_downsampled, "frame_downsampled", frame_number);
 		delete frame_lowpassed_final;
@@ -537,14 +661,13 @@ int encode() {
         // Convert to frequency domain
 		print("Convert to frequency domain...");
 
-		gettimeofday(&starttime, NULL);
+		tick(&clock);
 		Frame* frame_dct = new Frame(width, height, DOWNSAMPLE);
 
         dct8x8(frame_downsampled->Y, frame_dct->Y);
         dct8x8(frame_downsampled->Cb, frame_dct->Cb);
         dct8x8(frame_downsampled->Cr, frame_dct->Cr);
-        gettimeofday(&endtime, NULL);
-		runtime[5] = double(endtime.tv_sec)*1000.0f + double(endtime.tv_usec)/1000.0f - double(starttime.tv_sec)*1000.0f - double(starttime.tv_usec)/1000.0f; //in ms
+		runtime[5] = tock(&clock);
 
         dump_frame(frame_dct, "frame_dct", frame_number);
 		delete frame_downsampled;
@@ -552,14 +675,13 @@ int encode() {
         //Quantize the data
 		print("Quantize...");
 
-		gettimeofday(&starttime, NULL);
+		tick(&clock);
         Frame* frame_quant = new Frame(width, height, DOWNSAMPLE);
 
         quant8x8(frame_dct->Y, frame_quant->Y);
 		quant8x8(frame_dct->Cb, frame_quant->Cb);
 		quant8x8(frame_dct->Cr, frame_quant->Cr);
-        gettimeofday(&endtime, NULL);
-		runtime[6] = double(endtime.tv_sec)*1000.0f + double(endtime.tv_usec)/1000.0f - double(starttime.tv_sec)*1000.0f - double(starttime.tv_usec)/1000.0f; //in ms
+		runtime[6] = tock(&clock);
 
 		dump_frame(frame_quant, "frame_quant", frame_number);
 		delete frame_dct;
@@ -567,28 +689,26 @@ int encode() {
         //Extract the DC components and compute the differences
 		print("Compute DC differences...");
 
-		gettimeofday(&starttime, NULL);
+		tick(&clock);
 		Frame* frame_dc_diff = new Frame(1, (width/8)*(height/8), DCDIFF); //dealocate later
 
         dcDiff(frame_quant->Y, frame_dc_diff->Y);
         dcDiff(frame_quant->Cb, frame_dc_diff->Cb);
         dcDiff(frame_quant->Cr, frame_dc_diff->Cr);
-		gettimeofday(&endtime, NULL);
-		runtime[7] = double(endtime.tv_sec)*1000.0f + double(endtime.tv_usec)/1000.0f - double(starttime.tv_sec)*1000.0f - double(starttime.tv_usec)/1000.0f; //in ms
+		runtime[7] = tock(&clock);
 
         dump_dc_diff(frame_dc_diff, "frame_dc_diff", frame_number);
 
 		// Zig-zag order for zero-counting
 		print("Zig-zag order...");
-        gettimeofday(&starttime, NULL);
+		tick(&clock);
 
 		Frame* frame_zigzag = new Frame(MPEG_CONSTANT, width*height/MPEG_CONSTANT, ZIGZAG);
 
         zigZagOrder(frame_quant->Y, frame_zigzag->Y);
         zigZagOrder(frame_quant->Cb, frame_zigzag->Cb);
         zigZagOrder(frame_quant->Cr, frame_zigzag->Cr);
-		gettimeofday(&endtime, NULL);
-		runtime[8] = double(endtime.tv_sec)*1000.0f + double(endtime.tv_usec)/1000.0f - double(starttime.tv_sec)*1000.0f - double(starttime.tv_usec)/1000.0f; //in ms
+		runtime[8] = tock(&clock);
 
 		dump_zigzag(frame_zigzag, "frame_zigzag", frame_number);
 		delete frame_quant;
@@ -596,14 +716,13 @@ int encode() {
         // Encode coefficients
 		print("Encode coefficients...");
 
-		gettimeofday(&starttime, NULL);
+		tick(&clock);
 		FrameEncode* frame_encode = new FrameEncode(width, height, MPEG_CONSTANT);
 
         encode8x8(frame_zigzag->Y, frame_encode->Y);
         encode8x8(frame_zigzag->Cb, frame_encode->Cb);
         encode8x8(frame_zigzag->Cr, frame_encode->Cr);
-		gettimeofday(&endtime, NULL);
-		runtime[9] = double(endtime.tv_sec)*1000.0f + double(endtime.tv_usec)/1000.0f - double(starttime.tv_sec)*1000.0f - double(starttime.tv_usec)/1000.0f; //in ms
+		runtime[9] = tock(&clock);
 
 		delete frame_zigzag;
 

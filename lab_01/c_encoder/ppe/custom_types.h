@@ -9,6 +9,7 @@ float max(float a, float b);
  
 //float round(float number);
 
+#include <immintrin.h>
 
 class Channel{
 public:

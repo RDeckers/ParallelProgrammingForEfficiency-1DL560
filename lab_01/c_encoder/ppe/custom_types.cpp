@@ -20,13 +20,15 @@ float round(float number){
 Channel::Channel(int _width, int _height){
 	width = _width;
 	height = _height;
-	data = new float[_width*_height];
+	//padded_width = ((_width+7)&(~7)) +2;//round up to nearest multiple of 8 and add 2 (boundary)
+	//padded_height = ((_height+7)&(~7)) +2;
+	data = new float[width*height];
 }
 
 Channel::Channel(Channel* in){
 	width = in->width;
 	height = in->height;
-	
+
 	int npixels = in->width*in->height;
 	data = new float[npixels];
 	
