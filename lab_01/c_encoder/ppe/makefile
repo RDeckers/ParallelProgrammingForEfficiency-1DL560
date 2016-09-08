@@ -16,9 +16,9 @@ else
 	REPORT = @echo -e "\e[4;1;37m$1\033[0m"
 endif
 
-CXX_FLAGS += -I/usr/include/libxml2 -g
+CXX_FLAGS += -I/usr/include/libxml2 -g -fopenmp
 CXX_FLAGS_RELEASE += $(CXX_FLAGS) -march=native -O2
-LD_FLAGS += -lxml2 -ltiff -flto
+LD_FLAGS += -lxml2 -ltiff -flto -fopenmp
 
 PROJECT_DIR :=$(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 DEBUG_DIR := $(PROJECT_DIR)Debug/

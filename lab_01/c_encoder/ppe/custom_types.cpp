@@ -5,8 +5,7 @@
 #include <math.h>
 #include "config.h"
 
-
-float max(float a, float b) { 
+float max(float a, float b) {
     if(a > b) return a;
     return b;
 }
@@ -22,7 +21,7 @@ Channel::Channel(int _width, int _height){
 	height = _height;
 	//padded_width = ((_width+7)&(~7)) +2;//round up to nearest multiple of 8 and add 2 (boundary)
 	//padded_height = ((_height+7)&(~7)) +2;
-	data = new float[width*height];
+	v_data = (v8f*) _mm_malloc(sizeof(float)*width*height, 32);
 }
 
 Channel::Channel(Channel* in){
@@ -30,22 +29,22 @@ Channel::Channel(Channel* in){
 	height = in->height;
 
 	int npixels = in->width*in->height;
-	data = new float[npixels];
-	
+	v_data = (v8f*) _mm_malloc(sizeof(float)*npixels, 32);
+
 	for(int i=0; i<npixels; i++)
 		data[i] = in->data[i];
 }
 
 Channel::~Channel(){
-	delete data;
+	_mm_free(data);
 }
 /*
 void Channel::operator=(Channel* ch){
 	int npixels = ch->width * ch->height;
-	
+
 	this->width = ch->width;
 	this->height = ch->height;
-	
+
 	for(int i=0; i<npixels; i++)
 		this->data[i] = ch->data[i];
 }
@@ -53,10 +52,10 @@ void Channel::operator=(Channel* ch){
 
 void Channel::copy(Channel* ch){
 	int npixels = ch->width * ch->height;
-	
+
 	this->width = ch->width;
 	this->height = ch->height;
-	
+
 	for(int i=0; i<npixels; i++)
 		this->data[i] = ch->data[i];
 }

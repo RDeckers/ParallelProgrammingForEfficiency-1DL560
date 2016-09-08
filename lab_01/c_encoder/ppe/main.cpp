@@ -15,7 +15,11 @@
 #include "bench.h"
 
 using namespace std;
-#define OPTIM
+
+#define SIMD_OPT
+#define MEMORY_OPT
+#define PARALLEL_OPT
+
 //can be optimized by saving bytes instead of floats and converting dynamically.
 //also should load next frame async in the background.
 void loadImage(int number, string path, Image** photo) {
@@ -58,39 +62,106 @@ void loadImage(int number, string path, Image** photo) {
     TIFFClose(tif);
 
 }
-
-void convertRGBtoYCbCr_inplace(Image* in) {
+#ifdef MEMORY_OPT
+#ifdef SIMD_OPT
+//memory bound? ~1.2 GPixel/s
+void convertRGBtoYCbCr(Image* in, Image *out) {
 	int width = in->width;
 	int height = in->height;
+#ifdef PARALLEL_OPT
+#pragma omp parallel for
+#endif
+	for (int i = 0; i < width*height; i+=8) {
+    //memory bound because changing this += 8 to +=16 (same amournt of CLs, half the compute) does not affect the result.
+    //In order to speed things up more, we should change it to so that the input is bytes. which would still be memory bound, but less so.
+    //loads and stores 3*2048*2048*4*2 bytes,
+    // @25.6 GB/s = 3.9e6 ns
+			v8f R = in->rc->get_8(i);
+			v8f G = in->gc->get_8(i);
+			v8f B = in->bc->get_8(i);
+			v8f Y = 0.0f + (0.299f*R); + (0.587f*G) + (0.113f*B);
+			v8f Cb = 128.0f - (0.168736f*R) - (0.331264f*G) + (0.5f*B);
+			v8f Cr = 128.0f + (0.5f*R) - (0.418688f*G) - (0.081312f*B);
+      _mm256_stream_ps(out->rc->data+i, Y);
+      _mm256_stream_ps(out->gc->data+i, Cb);
+      _mm256_stream_ps(out->bc->data+i, Cr);
+			// in->rc->set_8(i, Y);
+			// in->gc->set_8(i, Cb);
+			// in->bc->set_8(i, Cr);
+		}
+  _mm_mfence();
+}
+#else//mem but not simd
 
-	for (int y = 0; y<height; y++) {
-		for (int x = 0; x<width; x++) {
-			float R = in->rc->get(x, y);
-			float G = in->gc->get(x, y);
-			float B = in->bc->get(x, y);
-			float Y = 0 + ((float)0.299*R) + ((float)0.587*G) + ((float)0.113*B);
+//  compute bound
+void convertRGBtoYCbCr(Image* in, Image *out) {
+	int width = in->width;
+	int height = in->height;
+  #ifdef PARALLEL_OPT
+  #pragma omp parallel for
+  #endif
+  for(int i = 0; i < width*height; i++){
+			float R = in->rc->get(i);
+			float G = in->gc->get(i);
+			float B = in->bc->get(i);
+      //9 FMAS, can perform 2 per cycle, so 5 cycles to do this.
+      //Means one pixel per 5 cycles = 1 per 2.5ns = 400 MPixel/s
+			float Y = 0 + ((float)0.299*R); + ((float)0.587*G) + ((float)0.113*B);
 			float Cb = 128 - ((float)0.168736*R) - ((float)0.331264*G) + ((float)0.5*B);
 			float Cr = 128 + ((float)0.5*R) - ((float)0.418688*G) - ((float)0.081312*B);
-			in->rc->set(x, y, Y);
-			in->gc->set(x, y, Cb);
-			in->bc->set(x, y, Cr);
-		}
-	}
+			out->rc->set(i, Y);
+			out->gc->set(i, Cb);
+			out->bc->set(i, Cr);
+    }
 }
+#endif //not memory opt
 
+#else
+#ifdef SIMD_OPT//but simd
+void convertRGBtoYCbCr(Image* in, Image *out) {
+	int width = in->width;
+	int height = in->height;
+#ifdef PARALLEL_OPT
+#pragma omp parallel for
+#endif
+  for(int y=0; y<width; y+=8) {
+  for (int x = 0; x<height; x++){
+    //memory bound because chaing this += 8 to +=16 (same amournt of CLs, half the compute) does not affect the result.
+    //In order to speed thingsp more, we should change it to so that the input is bytes. which would still be memory bound, but less so.
+    //loads and stores 3*2048*2048*4*2 bytes,
+    // @25.6 GB/s = 3.9e6 ns
+			v8f R = in->rc->get_8(y,x);
+			v8f G = in->gc->get_8(y,x);
+			v8f B = in->bc->get_8(y,x);
+			v8f Y = 0.0f + (0.299f*R); + (0.587f*G) + (0.113f*B);
+			v8f Cb = 128.0f - (0.168736f*R) - (0.331264f*G) + (0.5f*B);
+			v8f Cr = 128.0f + (0.5f*R) - (0.418688f*G) - (0.081312f*B);
+      //_mm256_stream_ps(out->rc->data+i, Y);
+      //_mm256_stream_ps(out->gc->data+i, Cb);
+      //_mm256_stream_ps(out->bc->data+i, Cr);
+			out->rc->set_8(y,x, Y);
+			out->gc->set_8(y,x, Cb);
+			out->bc->set_8(y,x, Cr);
+		}
+  }
+}
+#else //no simd
 void convertRGBtoYCbCr(Image* in, Image* out){
     int width = in->width;
     int height = in->height;
 
-		for(int y=0; y<width; y++) {
-			for (int x = 0; x<height; x++) {
+    #ifdef PARALLEL_OPT
+    #pragma omp parallel for
+    #endif
+      for(int y=0; y<width; y++) {
+			for (int x = 0; x<height; x++){
 
 			float R = in->rc->get(y,x);
 			float G = in->gc->get(y,x);
 			float B = in->bc->get(y,x);
 			float Y = 0+((float)0.299*R)+((float)0.587*G)+((float)0.113*B);
 			float Cb = 128-((float)0.168736*R)-((float)0.331264*G)+((float)0.5*B);
-            float Cr = 128+((float)0.5*R)-((float)0.418688*G)-((float)0.081312*B);
+      float Cr = 128+((float)0.5*R)-((float)0.418688*G)-((float)0.081312*B);
 			out->rc->get_ref(y,x) = Y;
 			out->gc->get_ref(y,x) = Cb;
 			out->bc->get_ref(y,x) = Cr;
@@ -99,95 +170,9 @@ void convertRGBtoYCbCr(Image* in, Image* out){
 
     //return out;
 }
-//
-//Channel* lowPass(Channel* in, Channel* out) {
-//	// Applies a simple 3-tap low-pass filter in the X- and Y- dimensions.
-//	// E.g., blur
-//	// weights for neighboring pixels
-//	float a = 0.25;
-//	float b = 0.5;
-//	float c = 0.25;
-//
-//	int width = in->width;
-//	int height = in->height;
-//
-//	out->copy(in);
-//
-//	const int block_size = 8;
-//
-//	const int block_x = (width-2) / block_size;
-//	const int block_x_rem = (width-2) % block_size;
-//
-//	const int block_y = (height-2) / block_size;
-//	const int block_y_rem = (height-2) % block_size;
-//
-//	float block_buff[(block_size+1)*(block_size+1)];
-//
-//
-//	for (int by = 0; by < block_y; by++) {
-//		for (int bx = 0; bx < block_x; bx++) {
-//			for (int y = 0; y < block_size+1; y++) {
-//				for (int x = 0; x < block_size+1; x++) {
-//					block_buff[y*block_size + x] = in->get(x + bx*block_size, y + by*block_size);
-//				}
-//			}
-//			//horizonatal blur
-//			float prev = block_buff[block_size + 1];
-//			float current = block_buff[block_size + 2];
-//			for (int y = 1; y < block_size; y++) {
-//				for (int x = 1; x < block_size; x++) {
-//					float next = block_buff[y*block_size + x+1];
-//					block_buff[y*block_size + x] = a*prev + b*current + c*next;
-//					prev = current;
-//					current = next;
-//				}
-//			}
-//			//vertical blur
-//			prev = block_buff[1];
-//			current = block_buff[block_size + 2];
-//			for (int y = 1; y < block_size; y++) {
-//				for (int x = 1; x < block_size; x++) {
-//					float next = block_buff[(y+1)*block_size + x];
-//					block_buff[y*block_size + x] = a*prev + b*current + c*next;
-//					prev = current;
-//					current = next;
-//				}
-//			}
-//
-//			//WB
-//			for (int y = 0; y < block_size; y++) {
-//				for (int x = 0; x < block_size; x++) {
-//					in->set(x + bx*block_size, y + by*block_size, block_buff[(y+1)*block_size + x + 1]);
-//				}
-//			}
-//		}
-//		//TODO: pad with to be multiple of 8.
-//		return out;
-//	}
-//
-//	//for (int y = 1; y < height - 1; y++) {
-//	//	for (int x = 1; x < width - 1; x++) {
-//	//		float c = in->get 
-//	//		out->set(x,y )
-//	//	}
-//	//}
-//
-//	// In X
-//	//for (int y = 1; y<(height - 1); y++) {
-//	//	for (int x = 1; x<(width - 1); x++) {
-//	//		out->set(x, y, a*in->get(x - 1, y) + b*in->get(x, y) + c*in->get(x + 1, y));
-//	//	}
-//	//}
-//	//// In Y
-//	//for (int y = 1; y<(height - 1); y++) {
-//	//	for (int x = 1; x<(width - 1); x++) {
-//	//		out->set(x, y, a*in->get(x, y - 1) + b*in->get(x, y) + c*in->get(x, y + 1));
-//	//	}
-//	//}
-//
-//	//return out;
-//}
-//
+#endif
+#endif
+
 Channel* lowPass(Channel* in, Channel* out){
     // Applies a simple 3-tap low-pass filter in the X- and Y- dimensions.
     // E.g., blur
@@ -251,9 +236,9 @@ std::vector<mVector>* motionVectorSearch(Frame* source, Frame* match, int width,
                             int match_y = my+y;
                             int search_x = sx+x;
                             int search_y = sy+y;
-                            float diff_Y = abs(match->Y->get(match_y, match_x) - source->Y->get(search_y, search_x));
-							float diff_Cb = abs(match->Cb->get(match_y, match_x) - source->Cb->get(search_y, search_x));
-							float diff_Cr = abs(match->Cr->get(match_y, match_x) - source->Cr->get(search_y, search_x));
+                            float diff_Y  = fabs(match->Y->get(match_y, match_x) - source->Y->get(search_y, search_x));
+							              float diff_Cb = fabs(match->Cb->get(match_y, match_x) - source->Cb->get(search_y, search_x));
+							              float diff_Cr = fabs(match->Cr->get(match_y, match_x) - source->Cr->get(search_y, search_x));
 
                             float diff_total = Y_weight*diff_Y + Cb_weight*diff_Cb + Cr_weight*diff_Cr;
                             current_match_sad = current_match_sad + diff_total;
@@ -318,41 +303,116 @@ Frame* computeDelta(Frame* i_frame_ycbcr, Frame* p_frame_ycbcr, std::vector<mVec
     return delta;
 }
 
-
-#ifndef OPTIM
-Channel* downSample(Channel* in){
-	int width = in->width;
-	int height = in->height;
-
-	Channel* out = new Channel(width/2,height/2);
-	int w2 = out->width;
-	int h2 = out->height;
-	for(int y2=0,y=0; y2<w2; y2++) {
-		for (int x2 = 0, x = 0; x2<h2; x2++) {
-           out->set(y2, x2, in->get(y,x));
-           x+=2;
+#ifdef MEMORY_OPT
+#ifdef SIMD_OPT
+Frame* downSample_frame(Frame* in, Frame *out) {
+	int w2 = out->Cb->width;
+	int h2 = out->Cb->height;
+  //printf("%d by %d\n", w2, h2);
+  v8i idx = {0, 2, 4, 6, 0,2,4,6};
+  unsigned bytes =0;
+  #ifdef PARALLEL_OPT
+  #pragma omp parallel for
+  #endif
+	for (int y2 = 0; y2<h2; y2++) {//changed loop around, much better cache behaviour.
+		for (int x2 = 0; x2<w2; x2+=8) {//24 bytes per loop.
+      v8f a = _mm256_permutevar8x32_ps(in->Cb->get_8(2*x2, 2*y2), (__m256i)idx);//read 8 floats
+      v8f b = _mm256_permutevar8x32_ps(in->Cb->get_8(2*x2+8, 2*y2), (__m256i)idx);//read 8 floats
+      v8f c = _mm256_blend_ps (a, b, 0b00001111);
+      //out->Cb->set_8(x2, y2, c);
+      _mm256_stream_ps(out->Cb->data+y2*w2+x2, c);
+      a = _mm256_permutevar8x32_ps(in->Cr->get_8(2*x2, 2*y2), (__m256i)idx);//read 8 floats
+      b = _mm256_permutevar8x32_ps(in->Cr->get_8(2*x2+8, 2*y2), (__m256i)idx);//read 8 floats
+      c = _mm256_blend_ps (a, b, 0b00001111);
+      //out->Cr->set_8(x2, y2, c);
+      _mm256_stream_ps(out->Cr->data+y2*w2+x2, c);
+		}
+		//y += 2;
+	}//total iterations = (1024*1024/8)
+  //total bytes = 24*4*(1024*1024/8)
+  // @ 25.6 GB/s = 4.5e6 ns
+  //printf("handled %u bytes\n Should have taken %e ns\n", bytes, 2*((double)bytes)/25.6 );
+  _mm_mfence();
+	return out;
+}
+#else
+//mem but not simd
+Frame* downSample_frame(Frame* in, Frame* out){
+  int w2 = out->Cb->width;
+  int h2 = out->Cb->height;
+  #ifdef PARALLEL_OPT
+  #pragma omp parallel for
+  #endif
+	for(int y2=0; y2<h2; y2++) {
+		for (int x2 = 0; x2<w2; x2++) {
+           out->Cb->set(x2, y2, in->Cb->get(x2*2,y2*2));
+           out->Cr->set(x2, y2, in->Cr->get(x2*2,y2*2));
        }
-      y+=2;
     }
     return out;
 }
+#endif
 #else
-Channel* downSample(Channel* in) {
-	int width = in->width;
-	int height = in->height;
-
-	Channel* out = new Channel(width / 2, height / 2);
-	int w2 = out->width;
-	int h2 = out->height;
-	for (int y2 = 0, y = 0; y2<h2; y2++) {
-		for (int x2 = 0, x = 0; x2<w2; x2++) {
-			out->set(x2, y2, in->get(x, y));
-			x += 2;
+#ifdef SIMD_OPT
+Frame* downSample_frame(Frame* in, Frame *out) {
+	int w2 = out->Cb->width;
+	int h2 = out->Cb->height;
+  //printf("%d by %d\n", w2, h2);
+  v8i idx = {0, 2, 4, 6, 0,2,4,6};
+  unsigned bytes =0;
+  #ifdef PARALLEL_OPT
+  #pragma omp parallel for
+  #endif
+  for (int x2 = 0; x2<w2; x2+=8) {//24 bytes per loop.
+	   for (int y2 = 0; y2<h2; y2++) {//changed loop around, much better cache behaviour.
+      v8f a = _mm256_permutevar8x32_ps(in->Cb->get_8(2*x2, 2*y2), (__m256i)idx);//read 8 floats
+      v8f b = _mm256_permutevar8x32_ps(in->Cb->get_8(2*x2+8, 2*y2), (__m256i)idx);//read 8 floats
+      v8f c = _mm256_blend_ps (a, b, 0b00001111);
+      out->Cb->set_8(x2, y2, c);
 		}
-		y += 2;
-	}
+		//y += 2;
+	}//total iterations = (1024*1024/8)
+  #ifdef PARALLEL_OPT
+  #pragma omp parallel for
+  #endif
+  for (int x2 = 0; x2<w2; x2+=8) {//24 bytes per loop.
+	   for (int y2 = 0; y2<h2; y2++) {//changed loop around, much better cache behaviour.
+      v8f a = _mm256_permutevar8x32_ps(in->Cr->get_8(2*x2, 2*y2), (__m256i)idx);//read 8 floats
+      v8f b = _mm256_permutevar8x32_ps(in->Cr->get_8(2*x2+8, 2*y2), (__m256i)idx);//read 8 floats
+      v8f c = _mm256_blend_ps (a, b, 0b00001111);
+      out->Cr->set_8(x2, y2, c);
+		}
+		//y += 2;
+	}//total iterations = (1024*1024/8)
+  //total bytes = 24*4*(1024*1024/8)
+  // @ 25.6 GB/s = 4.5e6 ns
+  //printf("handled %u bytes\n Should have taken %e ns\n", bytes, 2*((double)bytes)/25.6 );
+  //_mm_mfence();
 	return out;
 }
+#else
+Frame* downSample_frame(Frame* in, Frame* out){
+  int w2 = out->Cb->width;
+  int h2 = out->Cb->height;
+  #ifdef PARALLEL_OPT
+  #pragma omp parallel for
+  #endif
+  for (int x2 = 0; x2<w2; x2++) {
+	 for(int y2=0; y2<h2; y2++) {
+           out->Cb->set(x2, y2, in->Cb->get(x2*2,y2*2));
+       }
+    }
+    #ifdef PARALLEL_OPT
+    #pragma omp parallel for
+    #endif
+    for (int x2 = 0; x2<w2; x2++) {
+  	 for(int y2=0; y2<h2; y2++) {
+             out->Cr->set(x2, y2, in->Cr->get(x2*2,y2*2));
+         }
+      }
+    return out;
+}
+#endif
 #endif
 
 void dct8x8(Channel* in, Channel* out){
@@ -573,18 +633,16 @@ int encode() {
 
         //  Convert to YCbCr
 		print("Covert to YCbCr...");
-
-		
-		//Image* frame_ycbcr = new Image(width, height, FULLSIZE);
+		Image* frame_ycbcr = new Image(width, height, FULLSIZE);
 		tick(&clock);
-		//convertRGBtoYCbCr(frame_rgb, frame_ycbcr);
-		convertRGBtoYCbCr_inplace(frame_rgb);
-		
+		convertRGBtoYCbCr(frame_rgb, frame_ycbcr);
+		//convertRGBtoYCbCr_inplace(frame_rgb);
+
 		runtime[0] = tock(&clock);
-		Image* frame_ycbcr = frame_rgb;
-		frame_rgb = nullptr;
+		//Image* frame_ycbcr = frame_rgb;
+		//frame_rgb = nullptr;
 		dump_image(frame_ycbcr, "frame_ycbcr", frame_number);
-		//delete frame_rgb;
+		delete frame_rgb;
 
         // We low pass filter Cb and Cr channesl
         print("Low pass filter...");
@@ -597,12 +655,12 @@ int encode() {
 
 		lowPass(frame_ycbcr->gc, frame_blur_cb);
 		lowPass(frame_ycbcr->bc, frame_blur_cr);
-
+    //Y frame doesn;t get touched.
 		frame_lowpassed->Y->copy(frame_ycbcr->rc);
 		frame_lowpassed->Cb->copy(frame_blur_cb);
         frame_lowpassed->Cr->copy(frame_blur_cr);
 		runtime[1] = tock(&clock);
-		
+
 
 		dump_frame(frame_lowpassed, "frame_ycbcr_lowpass", frame_number);
 		delete frame_ycbcr;
@@ -641,22 +699,17 @@ int encode() {
         // Downsample the difference
 		print("Downsample...");
 
-		tick(&clock);
-        Frame* frame_downsampled = new Frame(width, height, DOWNSAMPLE);
-
-        // We don't touch the Y frame
+    Frame* frame_downsampled = new Frame(width, height, DOWNSAMPLE);
+    // We don't touch the Y frame
 		frame_downsampled->Y->copy(frame_lowpassed_final->Y);
-        Channel* frame_downsampled_cb = downSample(frame_lowpassed_final->Cb);
-		frame_downsampled->Cb->copy(frame_downsampled_cb);
-        Channel* frame_downsampled_cr = downSample(frame_lowpassed_final->Cr);
-		frame_downsampled->Cr->copy(frame_downsampled_cr);
-  
+		tick(&clock);
+    downSample_frame(frame_lowpassed_final, frame_downsampled);
 		runtime[4] = tock(&clock);
 
         dump_frame(frame_downsampled, "frame_downsampled", frame_number);
 		delete frame_lowpassed_final;
-		delete frame_downsampled_cb;
-		delete frame_downsampled_cr;
+		//delete frame_downsampled_cb;
+		//delete frame_downsampled_cr;
 
         // Convert to frequency domain
 		print("Convert to frequency domain...");

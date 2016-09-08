@@ -357,7 +357,7 @@ void writestats(int framenum, int is_pframe, double* runtime){
 	for(int i=0; i<10; i++){
 		if( !( (i==2 || i==3) && !is_pframe) ){
 			runtime_accum[i] += runtime[i];
-			file << setw(30) << left << function_name[i] << std::setprecision(0) << runtime[i] << "ms" << std::endl;
+			file << setw(30) << left << function_name[i] << std::setprecision(3) << runtime[i] << "ns" << std::endl;
 		}
 	}
 	file << std::endl;
@@ -371,9 +371,9 @@ void closeStats(void){
 	file << "********* " << "    Total   " << " *********" << std::endl;
 	for(int i=0; i<10; i++){
 		total += runtime_accum[i];
-		file << setw(30) << left << function_name[i] << std::setprecision(0) << runtime_accum[i] << "ms" << std::endl;
+		file << setw(30) << left << function_name[i] << std::setprecision(3) << runtime_accum[i] << "ns" << std::endl;
 	}
 	file << std::endl;
-	file << setw(30) << left << "Total runtime: " << total << "ms" << std::endl;
+	file << setw(30) << left << "Total runtime: " << total << "ns" << std::endl;
 	file.close();
 }
