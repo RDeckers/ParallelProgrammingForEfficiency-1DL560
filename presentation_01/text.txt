@@ -1,0 +1,60 @@
+Hi, my name is Roel Deckers and I am here today to tell you why you should learn some Rust.
+
+Now, what is Rust, you might be thinking.
+Rust is a new systems programming language designed by Mozilla, it is a competitor to 'C/C++' but is has some {\em unique} features to ste it apart...
+
+*click*
+
+Most notable of which, is that it is compile-time memory safe.
+What does this mean? Well this means no more use-after-free bugs,
+no more out-of-bounds reads, no more dangling pointers, no more dereferencing null-pointers,
+and even no more data-races.
+
+If you want something more concrete: it means no more heartbleed,
+ that major vulnerability from a while back which cause openSSL servers to leak their
+private keys.
+It also means no more stagefright, a bug in the android OS that allowed for remote-code-execution and privilige escalation. ouch.
+
+Furthermore, Rust has first-class support for multithreading. That means all of these guarentees, and more,
+work even in multithreaded applications. Rust will
+not prevent you from making a logic error. But without some extra work Rust will not allow you to share a
+mutateable variable across threads unless you give it some guarentees that it is safe to do so.
+
+And it does all of this, while being as fast as C. In fact, while the compiler is not there yet it should eventually be faster than C. Because the borrow-checker (the name
+of the memory safety system) gives the compiler much more information and guarentees to work with than would ever be possible in C, in the same way that Fortran is faster than C for
+numerical programming because it doesn't have pointer-aliassing.
+
+Now there's many more nice things about Rust and it's syntax, I hope you will all agree that cost-free memory safety is already a major selling-point...
+ But, can you actually make something with it?
+Yes, you can. For example:
+
+*click*
+You can make a webbrowser. What you see here is Github rendered with Servo. Mozillas attempt at making a better browser and
+the first big Rust project. Servo is completely memory safe and multithreaded.
+
+But you can't just make a webbrowser *click* you can also make a highly efficient webserver. This is just a small example, using the
+tokio-crate (crates are Rust's version of libraries) to write a fully asynchronous task-based webserver.
+ For now it just sends an empty response to each http-request but it can easilly be extended.
+
+If the web isn't really your thing, maybe you'd prefer to write *click* videogames.
+
+This is a screenshot of a pre-alpha RTS game called zone-of-control. Written in 100% pure Rust.
+Rust actually already has an active indie-gamedev community I'd reccomend you check out!
+
+And if that's not your thing either, well, Rust is a 'systems-programming language' after all... *click*
+you can just write an entire OS from scratch. Like the people of Redox OS did. This is a functional OS written in Rust and bits of Assembly.
+
+So, what's the catch? there's always a catch...
+
+For one, Rust is not an easy language to learn. That is the most common complaint people have. That it takes a long time to really grasp.
+Just like a first foray into functional programming, but also just like functional programming once it clicks I guarentee it will make you a
+better programmer.
+
+The ecosystem is still young. There are fewer libraries than there are for C or Pyhton (although still over 6k).  But,
+Rust is compatible with C, and this also means that you have an opportunity to actually make an impact on the ecosystem.
+
+And finaly, all this memory safety does come at a price. namely, longer compile times. And although they have been getting much better
+I think we can all agree that sometimes long compile-times aren't a bad thing.
+
+So in conclusion, why should you learn how to use Rust?
+ It's a blazingly fast memory-safe language, with which you can make whatever you like, and even if you don't end up using Rust. It will make you a better programmer.
