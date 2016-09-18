@@ -1,8 +1,11 @@
 #ifndef custom_types_h
 #define custom_types_h
 #include <immintrin.h>
-typedef float v8f __attribute__ ((vector_size (32)));
-typedef int v8i __attribute__ ((vector_size (32)));
+//typedef float __declspec(align(16)) v8f[8];
+typedef __m256 v8f;
+typedef __m256i v8i;
+//typedef float __declspec(align(16)) v8f[8];
+//typedef int v8i __attribute__ ((vector_size (32)));
 #include <vector>
 #include <string>
 

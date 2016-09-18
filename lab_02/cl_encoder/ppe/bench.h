@@ -1,10 +1,4 @@
 #include <time.h>
-#ifdef _MSC_VER
-struct timespec {
-	time_t   tv_sec;        /* seconds */
-	long     tv_nsec;       /* nanoseconds */
-};
-#endif
 //returns the time passed between start and end in ns.
 double time_diff(struct timespec *start, struct timespec *end);
 //returns the time in ns elapsed since T.
