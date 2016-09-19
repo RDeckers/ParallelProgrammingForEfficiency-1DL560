@@ -32,7 +32,7 @@ cl_mem mem_Cr;
 cl_mem mem_Cb;
 
 //#define SIMD_OPT
-//#define MEMORY_OPT
+#define MEMORY_OPT
 //#define PARALLEL_OPT
 
 //can be optimized by saving bytes instead of floats and converting dynamically.
@@ -121,123 +121,22 @@ void convertRGBtoYCbCr_cl(
   //wait for it to finish.
 }
 
-#ifdef MEMORY_OPT
-#ifdef SIMD_OPT
-//memory bound? ~1.2 GPixel/s
-
 void convertRGBtoYCbCr(Image* in, Image *out) {
   int width = in->width;
   int height = in->height;
-  #ifdef PARALLEL_OPT
-  #pragma omp parallel for schedule(static)
-  #endif
   for (int i = 0; i < width*height; i+=8) {
-    //memory bound because changing this += 8 to +=16 (same amournt of CLs, half the compute) does not affect the result.
-    //In order to speed things up more, we should change it to so that the input is bytes. which would still be memory bound, but less so.
-    //loads and stores 3*2048*2048*4*2 bytes,
-    // @25.6 GB/s = 3.9e6 ns
     v8f R = in->rc->get_8(i);
     v8f G = in->gc->get_8(i);
     v8f B = in->bc->get_8(i);
     v8f Y = 0.0f + (0.299f*R) + (0.587f*G) + (0.113f*B);
     v8f Cb = 128.0f - (0.168736f*R) - (0.331264f*G) + (0.5f*B);
     v8f Cr = 128.0f + (0.5f*R) - (0.418688f*G) - (0.081312f*B);
-    #ifndef PARALLEL_OPT
     _mm256_stream_ps(out->rc->data+i, Y);
     _mm256_stream_ps(out->gc->data+i, Cb);
     _mm256_stream_ps(out->bc->data+i, Cr);
-    #else
-    out->rc->set_8(i, Y);
-    out->gc->set_8(i, Cb);
-    out->bc->set_8(i, Cr);
-    #endif
-  }
-  #ifndef PARALLEL_OPT
-  _mm_mfence();
-  #endif
-}
-#else//mem but not simd
-
-//  compute bound
-void convertRGBtoYCbCr(Image* in, Image *out) {
-  int width = in->width;
-  int height = in->height;
-  #ifdef PARALLEL_OPT
-  #pragma omp parallel for schedule(static)
-  #endif
-  for(int i = 0; i < width*height; i++){
-    float R = in->rc->get(i);
-    float G = in->gc->get(i);
-    float B = in->bc->get(i);
-    //9 FMAS, can perform 2 per cycle, so 5 cycles to do this.
-    //Means one pixel per 5 cycles = 1 per 2.5ns = 400 MPixel/s
-    float Y = 0 + ((float)0.299*R); + ((float)0.587*G) + ((float)0.113*B);
-    float Cb = 128 - ((float)0.168736*R) - ((float)0.331264*G) + ((float)0.5*B);
-    float Cr = 128 + ((float)0.5*R) - ((float)0.418688*G) - ((float)0.081312*B);
-    out->rc->set(i, Y);
-    out->gc->set(i, Cb);
-    out->bc->set(i, Cr);
   }
   _mm_mfence();
 }
-#endif //not memory opt
-
-#else
-#ifdef SIMD_OPT//but simd
-void convertRGBtoYCbCr(Image* in, Image *out) {
-  int width = in->width;
-  int height = in->height;
-  #ifdef PARALLEL_OPT
-  #pragma omp parallel for schedule(dynamic)
-  #endif
-  for(int y=0; y<width; y+=8) {
-    for (int x = 0; x<height; x++){
-      //memory bound because chaing this += 8 to +=16 (same amournt of CLs, half the compute) does not affect the result.
-      //In order to speed thingsp more, we should change it to so that the input is bytes. which would still be memory bound, but less so.
-      //loads and stores 3*2048*2048*4*2 bytes,
-      // @25.6 GB/s = 3.9e6 ns
-      v8f R = in->rc->get_8(y,x);
-      v8f G = in->gc->get_8(y,x);
-      v8f B = in->bc->get_8(y,x);
-      v8f Y = 0.0f + (0.299f*R); + (0.587f*G) + (0.113f*B);
-      v8f Cb = 128.0f - (0.168736f*R) - (0.331264f*G) + (0.5f*B);
-      v8f Cr = 128.0f + (0.5f*R) - (0.418688f*G) - (0.081312f*B);
-      // _mm256_stream_ps(out->rc->data+x*width+y, Y);
-      // _mm256_stream_ps(out->gc->data+x*width+y, Cb);
-      // _mm256_stream_ps(out->bc->data+x*width+y, Cr);
-      out->rc->set_8(y,x, Y);
-      out->gc->set_8(y,x, Cb);
-      out->bc->set_8(y,x, Cr);
-    }
-  }
-}
-#else //no simd
-void convertRGBtoYCbCr(Image* in, Image* out){
-  int width = in->width;
-  int height = in->height;
-
-  #ifdef PARALLEL_OPT
-  #pragma omp parallel for schedule(dynamic)
-  #endif
-  for(int y=0; y<width; y++) {
-    for (int x = 0; x<height; x++){
-
-      float R = in->rc->get(y,x);//fetches
-      float G = in->gc->get(y,x);// 64
-      float B = in->bc->get(y,x);//bytes each
-      float Y = 0+((float)0.299*R)+((float)0.587*G)+((float)0.113*B);
-      float Cb = 128-((float)0.168736*R)-((float)0.331264*G)+((float)0.5*B);
-      float Cr = 128+((float)0.5*R)-((float)0.418688*G)-((float)0.081312*B);
-      out->rc->get_ref(y,x) = Y;//writes
-      out->gc->get_ref(y,x) = Cb;// 64
-      out->bc->get_ref(y,x) = Cr;//bytes each
-    }
-  }
-
-  //return out;
-}
-#endif
-#endif
 
 Channel* lowPass(Channel* in, Channel* out){
   // Applies a simple 3-tap low-pass filter in the X- and Y- dimensions.
@@ -250,9 +149,7 @@ Channel* lowPass(Channel* in, Channel* out){
   int width = in->width;
   int height = in->height;
 
-  //out = in; TODO Is this necessary?
   out->copy(in);
-
 
   // In X
   for (int y=1; y<(width-1); y++) {
@@ -369,50 +266,10 @@ Frame* computeDelta(Frame* i_frame_ycbcr, Frame* p_frame_ycbcr, std::vector<mVec
   return delta;
 }
 
-#ifdef MEMORY_OPT
-#ifdef SIMD_OPT
-Frame* downSample_frame(Frame* in, Frame *out) {
-  int w2 = out->Cb->width;
-  int h2 = out->Cb->height;
-  //printf("%d by %d\n", w2, h2);
-  v8i idx = {0, 2, 4, 6, 0,2,4,6};
-  unsigned bytes =0;
-  #ifdef PARALLEL_OPT
-  #pragma omp parallel for schedule(static)
-  #endif
-  for (int y2 = 0; y2<h2; y2++) {//changed loop around, much better cache behaviour.
-    for (int x2 = 0; x2<w2; x2+=8) {//24 bytes per loop.
-      v8f a = _mm256_permutevar8x32_ps(in->Cb->get_8(2*x2, 2*y2), (__m256i)idx);//read 8 floats
-      v8f b = _mm256_permutevar8x32_ps(in->Cb->get_8(2*x2+8, 2*y2), (__m256i)idx);//read 8 floats
-      v8f c = _mm256_blend_ps (a, b, 0b00001111);
-      #ifdef PARALLEL_OPT
-      out->Cb->set_8(x2, y2, c);
-      #else
-      _mm256_stream_ps(out->Cb->data+y2*w2+x2, c);
-      #endif
-      a = _mm256_permutevar8x32_ps(in->Cr->get_8(2*x2, 2*y2), (__m256i)idx);//read 8 floats
-      b = _mm256_permutevar8x32_ps(in->Cr->get_8(2*x2+8, 2*y2), (__m256i)idx);//read 8 floats
-      c = _mm256_blend_ps (a, b, 0b00001111);
-      #ifdef PARALLEL_OPT
-      out->Cr->set_8(x2, y2, c);
-      #else
-      _mm256_stream_ps(out->Cr->data+y2*w2+x2, c);
-      #endif
-    }
-  }
-  #ifndef PARALLEL_OPT
-  _mm_mfence();
-  #endif
-  return out;
-}
-#else
 //mem but not simd
 Frame* downSample_frame(Frame* in, Frame* out){
   int w2 = out->Cb->width;
   int h2 = out->Cb->height;
-  #ifdef PARALLEL_OPT
-  #pragma omp parallel for schedule(static)
-  #endif
   for(int y2=0; y2<h2; y2++) {
     for (int x2 = 0; x2<w2; x2++) {
       out->Cb->set(x2, y2, in->Cb->get(x2*2,y2*2));
@@ -421,69 +278,6 @@ Frame* downSample_frame(Frame* in, Frame* out){
   }
   return out;
 }
-#endif
-#else
-#ifdef SIMD_OPT
-Frame* downSample_frame(Frame* in, Frame *out) {
-  int w2 = out->Cb->width;
-  int h2 = out->Cb->height;
-  //printf("%d by %d\n", w2, h2);
-  v8i idx = {0, 2, 4, 6, 0,2,4,6};
-  unsigned bytes =0;
-  #ifdef PARALLEL_OPT
-  #pragma omp parallel for schedule(dynamic)
-  #endif
-  for (int x2 = 0; x2<w2; x2+=8) {//24 bytes per loop.
-    for (int y2 = 0; y2<h2; y2++) {//changed loop around, much better cache behaviour.
-      v8f a = _mm256_permutevar8x32_ps(in->Cb->get_8(2*x2, 2*y2), (__m256i)idx);//read 8 floats
-      v8f b = _mm256_permutevar8x32_ps(in->Cb->get_8(2*x2+8, 2*y2), (__m256i)idx);//read 8 floats
-      v8f c = _mm256_blend_ps (a, b, 0b00001111);
-      out->Cb->set_8(x2, y2, c);
-    }
-    //y += 2;
-  }//total iterations = (1024*1024/8)
-  #ifdef PARALLEL_OPT
-  #pragma omp parallel for schedule(dynamic)
-  #endif
-  for (int x2 = 0; x2<w2; x2+=8) {//24 bytes per loop.
-    for (int y2 = 0; y2<h2; y2++) {//changed loop around, much better cache behaviour.
-      v8f a = _mm256_permutevar8x32_ps(in->Cr->get_8(2*x2, 2*y2), (__m256i)idx);//read 8 floats
-      v8f b = _mm256_permutevar8x32_ps(in->Cr->get_8(2*x2+8, 2*y2), (__m256i)idx);//read 8 floats
-      v8f c = _mm256_blend_ps (a, b, 0b00001111);
-      out->Cr->set_8(x2, y2, c);
-    }
-    //y += 2;
-  }//total iterations = (1024*1024/8)
-  //total bytes = 24*4*(1024*1024/8)
-  // @ 25.6 GB/s = 4.5e6 ns
-  //printf("handled %u bytes\n Should have taken %e ns\n", bytes, 2*((double)bytes)/25.6 );
-  //_mm_mfence();
-  return out;
-}
-#else
-Frame* downSample_frame(Frame* in, Frame* out){
-  int w2 = out->Cb->width;
-  int h2 = out->Cb->height;
-  #ifdef PARALLEL_OPT
-  #pragma omp parallel for schedule(dynamic)
-  #endif
-  for (int x2 = 0; x2<w2; x2++) {
-    for(int y2=0; y2<h2; y2++) {
-      out->Cb->set(x2, y2, in->Cb->get(x2*2,y2*2));
-    }
-  }
-  #ifdef PARALLEL_OPT
-  #pragma omp parallel for schedule(dynamic)
-  #endif
-  for (int x2 = 0; x2<w2; x2++) {
-    for(int y2=0; y2<h2; y2++) {
-      out->Cr->set(x2, y2, in->Cr->get(x2*2,y2*2));
-    }
-  }
-  return out;
-}
-#endif
-#endif
 
 void dct8x8(Channel* in, Channel* out){
   int width = in->width;
