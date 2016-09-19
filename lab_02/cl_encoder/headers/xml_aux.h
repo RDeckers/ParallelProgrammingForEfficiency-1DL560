@@ -8,8 +8,8 @@
 #include <string.h>
 #include <vector>
 #include "custom_types.h"
-#include <libxml/parser.h>
-#include <libxml/tree.h>
+#include <libxml2/libxml/parser.h>
+#include <libxml2/libxml/tree.h>
 
 void print(std::string s);
 

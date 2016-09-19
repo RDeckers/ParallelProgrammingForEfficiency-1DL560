@@ -17,7 +17,7 @@
  #define N_FRAMES 10
  #define I_FRAME_FREQ 1
  #define DUMP_TO_DEBUG false
- #define image_name "blooper"
+ #define image_name "solar"
 
 
 #endif

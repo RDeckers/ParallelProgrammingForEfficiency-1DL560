@@ -10,12 +10,11 @@
 #include "xml_aux.h"
 #include "dct8x8_block.h"
 #include <vector>
-#include "gettimeofday.h"
 #include "config.h"
-#include "bench.h"
 #include <clu.h>
 #include <utilities/file.h>
 #include <utilities/logging.h>
+#include <utilities/benchmarking.h>
 
 using namespace std;
 
@@ -670,9 +669,11 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
 
   int encode() {
+    REPORT_W_COLORS = 1;
+    REPORT_W_TIMESTAMPS = 1;
     set_cwdir_to_bin_dir();
-    string image_path =  "../../../../inputs/" + string(image_name) + "/" + image_name + ".";
-    string stream_path = "../../outputs/stream_c_" + string(image_name) + ".xml";
+    string image_path =  "../../../inputs/" + string(image_name) + "/" + image_name + ".";
+    string stream_path = "../outputs/stream_c_" + string(image_name) + ".xml";
 
     xmlDocPtr stream = NULL;
 
@@ -727,7 +728,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     report(PASS, "Command queues created");
 
     work_dim = npixels;
-    work_item_dim = 512;
+    work_item_dim = 256;
     cl_int ret;
     mem_R = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
@@ -816,7 +817,6 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
 
     createStatsFile();
-    report(INFO, "Making a stream of size %dx%d", width, height);
     stream = create_xml_stream(width, height, QUALITY, WINDOW_SIZE, BLOCK_SIZE);
     vector<mVector>* motion_vectors = NULL;
 
@@ -825,7 +825,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       loadImage(frame_number, image_path, &frame_rgb);
 
       //  Convert to YCbCr
-      print("Covert to YCbCr...");
+      report(INFO, "Covert to YCbCr...");
       Image* frame_ycbcr = new Image(width, height, FULLSIZE);
       tick(&clock);
       convertRGBtoYCbCr_cl(frame_rgb, frame_ycbcr);
@@ -838,7 +838,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       delete frame_rgb;
 
       // We low pass filter Cb and Cr channesl
-      print("Low pass filter...");
+      report(INFO, "Low pass filter...");
 
       //TODO: split up channels for better memory locality.
       tick(&clock);
@@ -854,8 +854,6 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       frame_lowpassed->Cr->copy(frame_blur_cr);
       runtime[1] = tock(&clock);
 
-
-      report(INFO, "Dumping frame_ycbcr_lowpass with size %dx%d", frame_lowpassed->width, frame_lowpassed->height);
       dump_frame(frame_lowpassed, "frame_ycbcr_lowpass", frame_number);
       delete frame_ycbcr;
       delete frame_blur_cb;
@@ -868,13 +866,13 @@ void zigZagOrder(Channel* in, Channel* ordered) {
         // Note that in the first iteration we don't enter this branch!
 
         //Compute the motion vectors
-        print("Motion Vector Search...");
+        report(INFO, "Motion Vector Search...");
 
         tick(&clock);
         motion_vectors = motionVectorSearch(previous_frame_lowpassed, frame_lowpassed, frame_lowpassed->width, frame_lowpassed->height);
         runtime[2] =  tock(&clock);
 
-        print("Compute Delta...");
+        report(INFO, "Compute Delta...");
         tick(&clock);
         frame_lowpassed_final = computeDelta(previous_frame_lowpassed, frame_lowpassed, motion_vectors);
         runtime[3] = tock(&clock);
@@ -891,7 +889,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
 
       // Downsample the difference
-      print("Downsample...");
+      report(INFO, "Downsample...");
 
       Frame* frame_downsampled = new Frame(width, height, DOWNSAMPLE);
       // We don't touch the Y frame
@@ -906,7 +904,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       //delete frame_downsampled_cr;
 
       // Convert to frequency domain
-      print("Convert to frequency domain...");
+      report(INFO, "Convert to frequency domain...");
 
       tick(&clock);
       Frame* frame_dct = new Frame(width, height, DOWNSAMPLE);
@@ -920,7 +918,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       delete frame_downsampled;
 
       //Quantize the data
-      print("Quantize...");
+      report(INFO, "Quantize...");
 
       tick(&clock);
       Frame* frame_quant = new Frame(width, height, DOWNSAMPLE);
@@ -934,7 +932,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       delete frame_dct;
 
       //Extract the DC components and compute the differences
-      print("Compute DC differences...");
+      report(INFO, "Compute DC differences...");
 
       tick(&clock);
       Frame* frame_dc_diff = new Frame(1, (width/8)*(height/8), DCDIFF); //dealocate later
@@ -947,7 +945,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       dump_dc_diff(frame_dc_diff, "frame_dc_diff", frame_number);
 
       // Zig-zag order for zero-counting
-      print("Zig-zag order...");
+      report(INFO, "Zig-zag order...");
       tick(&clock);
 
       Frame* frame_zigzag = new Frame(MPEG_CONSTANT, width*height/MPEG_CONSTANT, ZIGZAG);
@@ -961,7 +959,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       delete frame_quant;
 
       // Encode coefficients
-      print("Encode coefficients...");
+      report(INFO, "Encode coefficients...");
 
       tick(&clock);
       FrameEncode* frame_encode = new FrameEncode(width, height, MPEG_CONSTANT);
@@ -973,7 +971,6 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
       delete frame_zigzag;
 
-      report(INFO, "streaming final encode frame @ %dx%d", frame_encode->width, frame_encode->height);
       stream_frame(stream, frame_number, motion_vectors, frame_number-1, frame_dc_diff, frame_encode);
       write_stream(stream_path, stream);
 

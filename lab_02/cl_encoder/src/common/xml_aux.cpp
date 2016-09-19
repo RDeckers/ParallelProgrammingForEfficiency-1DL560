@@ -33,7 +33,6 @@ void print(std::string s){
 }
 
 xmlDocPtr create_xml_stream(int width, int height, int quality, int window_size, int block_size){
-	report(INFO, "Making a new stream: %dx%d, q=%d, window_size=%d, block_size=%d", width, height, quality, window_size, block_size);
 	xmlDocPtr doc = xmlNewDoc(BAD_CAST "1.0");
     xmlNodePtr root_node = xmlNewNode(NULL, BAD_CAST "STREAM");
     xmlDocSetRootElement(doc, root_node);
@@ -41,7 +40,6 @@ xmlDocPtr create_xml_stream(int width, int height, int quality, int window_size,
 
     char buf[16];
     sprintf_s(buf, "%d", width);
-		report(WARN, "buf now filled with: %s (%d)", buf, width);
 	xmlNewProp(root_node, BAD_CAST "width", BAD_CAST buf);
 
 	sprintf_s(buf, "%d", height);

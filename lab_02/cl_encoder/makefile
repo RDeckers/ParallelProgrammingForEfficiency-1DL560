@@ -43,13 +43,8 @@ BINARIES := $(patsubst $(SRC_DIR)/%.cpp,$(BIN_DIR)/%,$(CPP_FILES))
 COMMON_CPP_FILES := $(wildcard $(SRC_DIR)/common/*.cpp)
 OBJ_FILES = $(patsubst $(SRC_DIR)/common/%.cpp,$(OBJ_DIR)/%.o,$(COMMON_CPP_FILES))
 
-LD_FLAGS += --std=c++14 -march=native -lOpenCL -lclu -lutilities -lm -ltiff -lxml2 -L$(INSTALL_LIB_DIR)
-CPP_FLAGS += --std=c++14 -O2 -pipe -march=native -I$(PROJECT_DIR)headers -I$(INSTALL_INCLUDE_DIR) -I/usr/include/libxml2/
-
-ifeq ($(OS),Windows_NT)
-	CPP_FLAGS += -I$(PROJECT_DIR)extlibs/include
-	LD_FLAGS += -l$(PROJECT_DIR)extlibs/lib
-endif
+LD_FLAGS += --std=c++11 -march=native -lOpenCL -lclu -lutilities -lm -ltiff -lxml2 -L$(INSTALL_LIB_DIR)
+CPP_FLAGS += --std=c++11 -O2 -pipe -march=native -I$(PROJECT_DIR)headers -I$(INSTALL_INCLUDE_DIR) -I/usr/include/libxml2 -IZ:/msys64/mingw64/include/libxml2/
 
 .SECONDARY: $(OBJ_FILES)
 
