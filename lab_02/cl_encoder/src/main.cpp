@@ -622,6 +622,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       report(INFO, "Covert to YCbCr...");
       Image* frame_ycbcr = new Image(width, height, FULLSIZE);
       tick(&clock);
+      //convert all channels colorspace
       convertRGBtoYCbCr_cl(frame_rgb, frame_ycbcr);
       //convertRGBtoYCbCr_inplace(frame_rgb);
 
@@ -636,6 +637,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
       //TODO: split up channels for better memory locality.
       tick(&clock);
+      //lowpass only Cb and Cr
       Channel* frame_blur_cb = new Channel(width, height);
       Channel* frame_blur_cr = new Channel(width, height);
       Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
@@ -654,7 +656,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       delete frame_blur_cr;
 
       Frame *frame_lowpassed_final = NULL;
-
+      //uses Cb/Cr at full resolution
       if (frame_number % i_frame_frequency != 0) {
         // We have a P frame
         // Note that in the first iteration we don't enter this branch!

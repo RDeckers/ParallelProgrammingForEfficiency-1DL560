@@ -42,13 +42,15 @@ BINARIES := $(patsubst $(SRC_DIR)/%.cpp,$(BIN_DIR)/%,$(CPP_FILES))
 
 COMMON_CPP_FILES := $(wildcard $(SRC_DIR)/common/*.cpp)
 OBJ_FILES = $(patsubst $(SRC_DIR)/common/%.cpp,$(OBJ_DIR)/%.o,$(COMMON_CPP_FILES))
+DATA_FILES := $(patsubst $(PLOTS_DIR)/%.gnuplot,$(DATA_DIR)/%.dat,$(PLOTS_GNUPLOT))
 
 LD_FLAGS += --std=c++11 -march=native -lOpenCL -lclu -lutilities -lm -ltiff -lxml2 -L$(INSTALL_LIB_DIR)
 CPP_FLAGS += --std=c++11 -O2 -pipe -march=native -I$(PROJECT_DIR)headers -I$(INSTALL_INCLUDE_DIR) -I/usr/include/libxml2 -IZ:/msys64/mingw64/include/libxml2/
 
-.SECONDARY: $(OBJ_FILES)
+.SECONDARY: $(OBJ_FILES) $(DATA_FILES)
 
 binaries: $(BINARIES)
+	$(call REPORT, $(PLOTS_GNUPLOT) $(PLOTS_DIR))
 
 report: plots
 	$(call REPORT, Making PDF)
@@ -56,7 +58,12 @@ report: plots
 
 plots: $(PLOTS_PNG)
 
-$(PLOTS_DIR)/%.png : $(DATA_DIR)/%.dat $(PLOTS_DIR)/%.gnuplot
+$(DATA_DIR)/%.dat : $(BIN_DIR)/%
+	$(call REPORT,Building $@)
+	$(call CHK_DIR_EXISTS, $(DATA_DIR))
+	$< > $@
+
+$(PLOTS_DIR)%.png : $(DATA_DIR)%.dat $(PLOTS_DIR)%.gnuplot
 	$(call REPORT,Building $@)
 	gnuplot -e "output_file='$@';term_type='png'" -c "$(patsubst %.png,%.gnuplot,$@)"
 
