@@ -63,9 +63,10 @@ void loadImage(int number, string path, Image** photo) {
 
 }
 
-void convertRGBtoYCbCr(Image* in, Image *out) {
-  int width = out->width;
-  int height = out->height;
+void convertRGBtoYCbCr(Image* in) {
+  int width = work_dim;
+  int height = work_dim;
+  //report(INFO,"working on an %dx%d image", work_item_dim, work_item_dim);
   #pragma omp parallel for
   for (int i = 0; i < width*height; i+=8) {
     v8f R = in->rc->get_8(i);
@@ -74,9 +75,9 @@ void convertRGBtoYCbCr(Image* in, Image *out) {
     v8f Y = 0.0f + (0.299f*R) + (0.587f*G) + (0.113f*B);
     v8f Cb = 128.0f - (0.168736f*R) - (0.331264f*G) + (0.5f*B);
     v8f Cr = 128.0f + (0.5f*R) - (0.418688f*G) - (0.081312f*B);
-    out->rc->set_8(i, Y);
-    out->gc->set_8(i, Cb);
-    out->bc->set_8(i, Cr);
+    in->rc->set_8(i, Y);
+    in->gc->set_8(i, Cb);
+    in->bc->set_8(i, Cr);
   }
   // _mm_mfence();
 }
@@ -125,11 +126,11 @@ int encode() {
       report(INFO,"starting on work_dim = %u (%ux%u)", work_dim, (1 << max_dim_log2), (1 << max_dim_log2));
     for (int frame_number = 0 ; frame_number < end_frame ; frame_number++) {
       Image* frame_rgb = frames_rgb[frame_number];
-      Image* frame_ycbcr = new Image(work_dim, work_dim, FULLSIZE);
+      //Image* frame_ycbcr = new Image(work_dim, work_dim, FULLSIZE);
       tick(&clock);
-      convertRGBtoYCbCr(frame_rgb, frame_ycbcr);
+      convertRGBtoYCbCr(frame_rgb);
       conversion_total_t[frame_number] = elapsed_since(&clock);
-      delete frame_ycbcr;
+      //delete frame_ycbcr;
     }
     std::sort(getTIFF_t, getTIFF_t+N_FRAMES);
     std::sort(upload_t, upload_t+N_FRAMES);
@@ -139,6 +140,7 @@ int encode() {
 
     printf("%u %.4e %.4e %.4e %.4e %.4e %.4e\n", 1 << max_dim_log2, setup_t, getTIFF_t[0], upload_t[0], convert_t[0], readback_t[0], conversion_total_t[0]);
   }
+    report(INFO, "Effective bandwith: %3.2f GB/s", ((4096*4096)*3*4*2)/(conversion_total_t[0]));
     return 0;
   }
 

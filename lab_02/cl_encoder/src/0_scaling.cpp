@@ -20,15 +20,15 @@ using namespace std;
 cl_command_queue *com_qs = NULL;
 cl_kernel kernel;
 size_t work_dim;
-size_t work_item_dim;
+size_t work_item_dim = 256;
 
 cl_mem mem_R;
 cl_mem mem_G;
 cl_mem mem_B;
 
-cl_mem mem_Y;
-cl_mem mem_Cr;
-cl_mem mem_Cb;
+// cl_mem mem_Y;
+// cl_mem mem_Cr;
+// cl_mem mem_Cb;
 
 //#define SIMD_OPT
 #define MEMORY_OPT
@@ -106,15 +106,15 @@ void convertRGBtoYCbCr_cl(){
 void readback(Image *out){
     //enque reading the output
     cl_int ret;
-    ret = clEnqueueReadBuffer(com_qs[0], mem_Y, CL_FALSE, 0, work_dim, out->rc->data, 0, NULL, NULL);
+    ret = clEnqueueReadBuffer(com_qs[0], mem_R, CL_FALSE, 0, work_dim, out->rc->data, 0, NULL, NULL);
     if(CL_SUCCESS != ret){
       report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
     }
-    ret = clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_FALSE, 0, work_dim, out->gc->data, 0, NULL, NULL);
+    ret = clEnqueueReadBuffer(com_qs[0], mem_G, CL_FALSE, 0, work_dim, out->gc->data, 0, NULL, NULL);
     if(CL_SUCCESS != ret){
       report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
     }
-    ret = clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_FALSE, 0, work_dim, out->bc->data, 0, NULL, NULL);
+    ret = clEnqueueReadBuffer(com_qs[0], mem_B, CL_FALSE, 0, work_dim, out->bc->data, 0, NULL, NULL);
     if(CL_SUCCESS != ret){
       report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
     }
@@ -190,7 +190,6 @@ int encode() {
     report(PASS, "Command queues created");
 
     work_dim = npixels;
-    work_item_dim = 256;
     cl_int ret;
     mem_R = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
@@ -204,19 +203,19 @@ int encode() {
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (B) returned: %s (%d)", cluErrorString(ret), ret);
     }
-
-    mem_Y = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels*sizeof(float), nullptr, &ret);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clCreateBuffer (Y) returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    mem_Cb = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels*sizeof(float), nullptr, &ret);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clCreateBuffer (Cb) returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    mem_Cr = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels*sizeof(float), nullptr, &ret);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
-    }
+    //
+    // mem_Y = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels*sizeof(float), nullptr, &ret);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clCreateBuffer (Y) returned: %s (%d)", cluErrorString(ret), ret);
+    // }
+    // mem_Cb = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels*sizeof(float), nullptr, &ret);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clCreateBuffer (Cb) returned: %s (%d)", cluErrorString(ret), ret);
+    // }
+    // mem_Cr = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels*sizeof(float), nullptr, &ret);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
+    // }
 
 
     char *program_src = NULL;
@@ -249,19 +248,19 @@ int encode() {
     if(CL_SUCCESS != ret){
       report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
     }
-
-    ret = clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)&mem_Y);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel, 4, sizeof(cl_mem), (void *)&mem_Cb);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel, 5, sizeof(cl_mem), (void *)&mem_Cr);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
+    //
+    // ret = clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)&mem_Y);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    // }
+    // ret = clSetKernelArg(kernel, 4, sizeof(cl_mem), (void *)&mem_Cb);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    // }
+    // ret = clSetKernelArg(kernel, 5, sizeof(cl_mem), (void *)&mem_Cr);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    // }
     setup_t = elapsed_since(&clock);
     /*/////////////////
     // END OPENCL INIT
@@ -274,16 +273,16 @@ int encode() {
       report(INFO,"starting on work_dim = %u (%ux%u)", work_dim, (1 << max_dim_log2), (1 << max_dim_log2));
     for (int frame_number = 0 ; frame_number < end_frame ; frame_number++) {
       Image* frame_rgb = frames_rgb[frame_number];
-      Image* frame_ycbcr = new Image(width, height, FULLSIZE);
+      //Image* frame_ycbcr = new Image(width, height, FULLSIZE);
       tick(&clock);
       upload_to_GPU(frame_rgb);
       upload_t[frame_number] = tock(&clock);
       convertRGBtoYCbCr_cl();
       convert_t[frame_number] = tock(&clock);
-      readback(frame_ycbcr);
+      readback(frame_rgb);
       readback_t[frame_number] = elapsed_since(&clock);
       conversion_total_t[frame_number] = readback_t[frame_number]+convert_t[frame_number]+upload_t[frame_number];
-      delete frame_ycbcr;
+      //delete frame_ycbcr;
     }
     std::sort(getTIFF_t, getTIFF_t+N_FRAMES);
     std::sort(upload_t, upload_t+N_FRAMES);
@@ -293,6 +292,7 @@ int encode() {
 
     printf("%u %.4e %.4e %.4e %.4e %.4e %.4e\n", 1 << max_dim_log2, setup_t, getTIFF_t[0], upload_t[0], convert_t[0], readback_t[0], conversion_total_t[0]);
   }
+    report(INFO, "Effective bandwith: %3.2f GB/s", ((4096*4096)*3*4*2)/(conversion_total_t[0]));
     return 0;
   }
 
