@@ -6,10 +6,10 @@ set key center top;
 set format x "2^{%L}"
 #set format y "2^{%L}"
 set ylabel "speedup"
-set xlabel "work dimensions"
+set xlabel "work dimnsions"
 set grid;
 plot\
-  '< paste data/c_scaling.dat data/scaling.dat' u 1:(100*$7/$14) w lp
+  '< awk "FNR==NR { a[FNR\""\""] = $0; next } { print a[FNR\""\""], $0 }"  data/0_scaling.dat data/1_scaling_c.dat' u 1:($14/$7) w lp
  #'data/c_scaling.dat' using 1:7 w lp title 'CPU',\
  #'data/scaling.dat' using 1:7 w lp title 'OpenCL'
 set output

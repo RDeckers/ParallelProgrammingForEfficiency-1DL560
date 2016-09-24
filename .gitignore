@@ -18,3 +18,5 @@ lab_01/outputs/*
 *.tlog
 lab_02/cl_encoder/bin/*
 lab_02/cl_encoder/obj/*
+*.dat
+*.png

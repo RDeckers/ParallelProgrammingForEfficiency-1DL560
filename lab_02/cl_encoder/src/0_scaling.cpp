@@ -122,37 +122,15 @@ void readback(Image *out){
     //wait for it to finish.
 }
 
-void convertRGBtoYCbCr(Image* in, Image *out) {
-  int width = in->width;
-  int height = in->height;
-  for (int i = 0; i < width*height; i+=8) {
-    v8f R = in->rc->get_8(i);
-    v8f G = in->gc->get_8(i);
-    v8f B = in->bc->get_8(i);
-    v8f Y = 0.0f + (0.299f*R) + (0.587f*G) + (0.113f*B);
-    v8f Cb = 128.0f - (0.168736f*R) - (0.331264f*G) + (0.5f*B);
-    v8f Cr = 128.0f + (0.5f*R) - (0.418688f*G) - (0.081312f*B);
-    _mm256_stream_ps(out->rc->data+i, Y);
-    _mm256_stream_ps(out->gc->data+i, Cb);
-    _mm256_stream_ps(out->bc->data+i, Cr);
-  }
-  _mm_mfence();
-}
-
 int encode() {
   REPORT_W_COLORS = 1;
   REPORT_W_TIMESTAMPS = 1;
   set_cwdir_to_bin_dir();
 
-  Image *frame_rgb = nullptr;
+  Image *frames_rgb[N_FRAMES] = {nullptr};
   string image_path =  "../../../inputs/" + string(image_name) + "/" + image_name + ".";
   report(INFO, "using image_path = %s", image_path.c_str());
-  loadImage(0, image_path, &frame_rgb);
-  int width = frame_rgb->width;
-  int height = frame_rgb->height;
-  int npixels = width*height;
-  report(INFO, "Image dimensions: %dx%d (%d pixels)", width, height, npixels);
-  delete frame_rgb;
+
 
   int end_frame = int(N_FRAMES);
   //struct timeval starttime, endtime;
@@ -163,6 +141,17 @@ int encode() {
   double convert_t[N_FRAMES] = {0};
   double conversion_total_t[N_FRAMES] = {0};
   double readback_t[N_FRAMES] = {0};
+
+  for(int frame_number = 0 ; frame_number < end_frame ; frame_number++){
+    tick(&clock);
+    loadImage(frame_number, image_path, frames_rgb+frame_number);
+    getTIFF_t[frame_number] = elapsed_since(&clock);
+    report(PASS, "Loaded image %d", frame_number);
+  }
+  int width = frames_rgb[0]->width;
+  int height = frames_rgb[0]->height;
+  int npixels = width*height;
+  report(INFO, "Image dimensions: %dx%d (%d pixels)", width, height, npixels);
 
 /*////////////////////
 // CL INIT
@@ -201,7 +190,7 @@ int encode() {
     report(PASS, "Command queues created");
 
     work_dim = npixels;
-    work_item_dim = 512;
+    work_item_dim = 256;
     cl_int ret;
     mem_R = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
@@ -280,16 +269,12 @@ int encode() {
 
     report(PASS, "Setup OpenCL");
     printf("#image_dimensions setup load/decode_image upload convert readback upload+convert+readback\n");
-    for(size_t max_dim_log2 = 5; max_dim_log2 <= 12; max_dim_log2++){
+    for(size_t max_dim_log2 = 4; max_dim_log2 <= 12; max_dim_log2++){
       work_dim = (1 << max_dim_log2)*(1 << max_dim_log2);
       report(INFO,"starting on work_dim = %u (%ux%u)", work_dim, (1 << max_dim_log2), (1 << max_dim_log2));
     for (int frame_number = 0 ; frame_number < end_frame ; frame_number++) {
-      frame_rgb = nullptr;
-      tick(&clock);
-      loadImage(frame_number, image_path, &frame_rgb);
-      getTIFF_t[frame_number] = elapsed_since(&clock);
+      Image* frame_rgb = frames_rgb[frame_number];
       Image* frame_ycbcr = new Image(width, height, FULLSIZE);
-      report(PASS, "Loaded image %d", frame_number);
       tick(&clock);
       upload_to_GPU(frame_rgb);
       upload_t[frame_number] = tock(&clock);
@@ -298,7 +283,6 @@ int encode() {
       readback(frame_ycbcr);
       readback_t[frame_number] = elapsed_since(&clock);
       conversion_total_t[frame_number] = readback_t[frame_number]+convert_t[frame_number]+upload_t[frame_number];
-      delete frame_rgb;
       delete frame_ycbcr;
     }
     std::sort(getTIFF_t, getTIFF_t+N_FRAMES);
