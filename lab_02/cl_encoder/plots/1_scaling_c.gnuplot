@@ -9,7 +9,8 @@ set ylabel "speedup"
 set xlabel "work dimnsions"
 set grid;
 plot\
-  '< paste data/0_scaling.dat data/1_scaling_c.dat' u 1:($14/$7) w lp
- #'data/c_scaling.dat' using 1:7 w lp title 'CPU',\
+ '< awk "FNR==NR{a[$1]=$2 FS $7;next}{ print $0, a[$1]}" data/1_scaling_c.dat data/0_scaling.dat' u 1:($9/$7) w lp title "Blocking",\
+ '< awk "FNR==NR{a[$1]=$2 FS $7;next}{ print $0, a[$1]}" data/1_scaling_c.dat data/2_scaling_nonblock.dat' u 1:($9/$7) w lp title "Non-Blocking"
+ #'data/1_scaling_c.dat' using 1:7 w lp title 'CPU',\
  #'data/scaling.dat' using 1:7 w lp title 'OpenCL'
 set output
