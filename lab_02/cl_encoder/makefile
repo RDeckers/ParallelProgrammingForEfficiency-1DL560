@@ -13,6 +13,7 @@ ifeq ($(OS),Windows_NT)
 	INSTALL_INCLUDE_DIR := Z:/include/
 	LIB_SUFFIX =.dll
 	OPENCL_HEADERS :=$(call rwildcard, Z:/include/CL/, *.h)
+	BINARY_EXTENSION := .exe
 else
 	REPORT = @echo -e "\e[4;1;37m$1\033[0m"
 	CHK_DIR_EXISTS = test -d $1 || mkdir -p $1
@@ -24,6 +25,7 @@ else
 	INSTALL_INCLUDE_DIR := ~/include/
 	LIB_SUFFIX :=.so
 	OPENCL_HEADERS :=/usr/include/CL/*.h
+	BINARY_EXTENSION := 
 endif
 
 PROJECT_DIR :=$(dir $(realpath $(lastword $(MAKEFILE_LIST))))
@@ -58,7 +60,7 @@ report: plots
 
 plots: $(PLOTS_PNG)
 
-$(DATA_DIR)/%.dat : $(BIN_DIR)/%
+$(DATA_DIR)%.dat : $(BIN_DIR)%$(BINARY_EXTENSION)
 	$(call REPORT,Building $@)
 	$(call CHK_DIR_EXISTS, $(DATA_DIR))
 	$< > $@
