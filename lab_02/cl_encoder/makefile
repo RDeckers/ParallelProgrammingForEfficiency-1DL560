@@ -58,7 +58,6 @@ report: plots
 	pdflatex -interaction=nonstopmode $(PROJECT_DIR)main.tex
 
 plots: $(PLOTS_PNG)
-	$(call REPORT, $(DATA_FILES))
 
 data: $(DATA_FILES)
 
@@ -67,7 +66,7 @@ $(DATA_DIR)/%.dat : $(BIN_DIR)/%$(BINARY_EXTENSION)
 	$(call CHK_DIR_EXISTS, $(DATA_DIR))
 	$< > $@
 
-$(PLOTS_DIR)/%.png : $(DATA_DIR)/%.dat $(PLOTS_DIR)/%.gnuplot
+$(PLOTS_DIR)/%.png : $(DATA_FILES) $(PLOTS_DIR)/%.gnuplot
 	$(call REPORT,Building $@)
 	gnuplot -e "output_file='$@';term_type='png'" -c "$(patsubst %.png,%.gnuplot,$@)"
 
