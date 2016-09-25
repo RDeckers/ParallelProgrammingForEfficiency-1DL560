@@ -25,7 +25,7 @@ else
 	INSTALL_INCLUDE_DIR := ~/include/
 	LIB_SUFFIX :=.so
 	OPENCL_HEADERS :=/usr/include/CL/*.h
-	BINARY_EXTENSION := 
+	BINARY_EXTENSION :=
 endif
 
 PROJECT_DIR :=$(dir $(realpath $(lastword $(MAKEFILE_LIST))))
@@ -40,7 +40,7 @@ PLOTS_GNUPLOT := $(call rwildcard, $(PLOTS_DIR), *.gnuplot)
 PLOTS_PNG := $(patsubst %.gnuplot, %.png, $(PLOTS_GNUPLOT))
 CPP_FILES := $(wildcard $(SRC_DIR)/*.cpp)
 SCRIPTS := $(wildcard $(SCRIPT_DIR)/*.sh)
-BINARIES := $(patsubst $(SRC_DIR)/%.cpp,$(BIN_DIR)/%,$(CPP_FILES))
+BINARIES := $(patsubst $(SRC_DIR)/%.cpp,$(BIN_DIR)/%$(BINARY_EXTENSION),$(CPP_FILES))
 
 COMMON_CPP_FILES := $(wildcard $(SRC_DIR)/common/*.cpp)
 OBJ_FILES = $(patsubst $(SRC_DIR)/common/%.cpp,$(OBJ_DIR)/%.o,$(COMMON_CPP_FILES))
@@ -52,24 +52,26 @@ CPP_FLAGS += --std=c++11 -O2 -pipe -march=native -I$(PROJECT_DIR)headers -I$(INS
 .SECONDARY: $(OBJ_FILES) $(DATA_FILES)
 
 binaries: $(BINARIES)
-	$(call REPORT, $(PLOTS_GNUPLOT) $(PLOTS_DIR))
 
 report: plots
 	$(call REPORT, Making PDF)
 	pdflatex -interaction=nonstopmode $(PROJECT_DIR)main.tex
 
 plots: $(PLOTS_PNG)
+	$(call REPORT, $(DATA_FILES))
 
-$(DATA_DIR)%.dat : $(BIN_DIR)%$(BINARY_EXTENSION)
-	$(call REPORT,Building $@)
+data: $(DATA_FILES)
+
+$(DATA_DIR)/%.dat : $(BIN_DIR)/%$(BINARY_EXTENSION)
+	$(call REPORT,Running $<)
 	$(call CHK_DIR_EXISTS, $(DATA_DIR))
 	$< > $@
 
-$(PLOTS_DIR)%.png : $(DATA_DIR)%.dat $(PLOTS_DIR)%.gnuplot
+$(PLOTS_DIR)/%.png : $(DATA_DIR)/%.dat $(PLOTS_DIR)/%.gnuplot
 	$(call REPORT,Building $@)
 	gnuplot -e "output_file='$@';term_type='png'" -c "$(patsubst %.png,%.gnuplot,$@)"
 
-$(BIN_DIR)% : $(SRC_DIR)/%.cpp $(OBJ_FILES)
+$(BIN_DIR)%$(BINARY_EXTENSION) : $(SRC_DIR)/%.cpp $(OBJ_FILES)
 	$(call REPORT,Building $@)
 	$(call CHK_DIR_EXISTS, $(dir $@))
 	g++ $(CPP_FLAGS) -o "$@" "$<" $(OBJ_FILES) $(LD_FLAGS)
