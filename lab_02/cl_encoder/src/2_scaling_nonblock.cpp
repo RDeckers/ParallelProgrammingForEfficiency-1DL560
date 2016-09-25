@@ -78,15 +78,15 @@ void loadImage(int number, string path, Image** photo) {
 }
 
 void upload_to_GPU(Image *in){
-  cl_int ret = clEnqueueWriteBuffer(com_qs[0], mem_R, CL_FALSE, 0, work_dim, in->rc->data, 0, NULL, NULL);
+  cl_int ret = clEnqueueWriteBuffer(com_qs[0], mem_R, CL_FALSE, 0, work_dim*sizeof(float), in->rc->data, 0, NULL, NULL);
   if(CL_SUCCESS != ret){
     report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
   }
-  ret = clEnqueueWriteBuffer(com_qs[0], mem_G, CL_FALSE, 0, work_dim, in->gc->data, 0, NULL, NULL);
+  ret = clEnqueueWriteBuffer(com_qs[0], mem_G, CL_FALSE, 0, work_dim*sizeof(float), in->gc->data, 0, NULL, NULL);
   if(CL_SUCCESS != ret){
     report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
   }
-  ret = clEnqueueWriteBuffer(com_qs[0], mem_B, CL_FALSE, 0, work_dim, in->bc->data, 0, NULL, NULL);
+  ret = clEnqueueWriteBuffer(com_qs[0], mem_B, CL_FALSE, 0, work_dim*sizeof(float), in->bc->data, 0, NULL, NULL);
   if(CL_SUCCESS != ret){
     report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
   }
@@ -108,15 +108,15 @@ void convertRGBtoYCbCr_cl(){
 void readback(Image *out){
     //enque reading the output
     cl_int ret;
-    ret = clEnqueueReadBuffer(com_qs[0], mem_R, CL_FALSE, 0, work_dim, out->rc->data, 0, NULL, NULL);
+    ret = clEnqueueReadBuffer(com_qs[0], mem_R, CL_FALSE, 0, work_dim*sizeof(float), out->rc->data, 0, NULL, NULL);
     if(CL_SUCCESS != ret){
       report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
     }
-    ret = clEnqueueReadBuffer(com_qs[0], mem_G, CL_FALSE, 0, work_dim, out->gc->data, 0, NULL, NULL);
+    ret = clEnqueueReadBuffer(com_qs[0], mem_G, CL_FALSE, 0, work_dim*sizeof(float), out->gc->data, 0, NULL, NULL);
     if(CL_SUCCESS != ret){
       report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
     }
-    ret = clEnqueueReadBuffer(com_qs[0], mem_B, CL_FALSE, 0, work_dim, out->bc->data, 0, NULL, NULL);
+    ret = clEnqueueReadBuffer(com_qs[0], mem_B, CL_FALSE, 0, work_dim*sizeof(float), out->bc->data, 0, NULL, NULL);
     if(CL_SUCCESS != ret){
       report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
     }
