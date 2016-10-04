@@ -1,0 +1,55 @@
+use asynchronous I/O to load images in the background
+
+upload images to the GPU, instead of data buffers
+ *Kind of hard to do with LibTIFF, no async functions and kinda annoying to use decode from memory.  (not fun)
+  *http://stackoverflow.com/questions/4624144/c-libtiff-read-and-save-file-from-and-to-memory
+  *use other library for loading images?
+
+Make sure GPU uses same buffers in RAM as CPU
+ (clCreateBuffer(USE_HOST_PTR) and/or clMapBuffer?)
+ *See memory_test.cpp, but that seems broke...
+
+do conversion & lowpass in one go. (Downsampling perhaps not needed if we store as images). Will have to see.
+  *Extend the kernel file to do these things. When using normal buffers, load data into local memory first for the lowpass?
+  *Look into storing image as bytes instead of floats. (if memory bound)
+
+Motion vector search:
+ Takes most time.
+ Load the relevant area around the current block in local mem.
+  *have each compute unit handle a starting pixel of a block (or several if needed).
+  *OR have each pixel in a tile be handled by a compute unit (16x16 block = 256 units)
+    bad idea.
+  then, for each tile/or compute unit we have a score. We need the best match. So we need to either sort them in some way on the GPU
+  or move back to cpu at this point.
+  ===========================================================================
+  reconsider our case here.
+
+General algorithm:
+========================
+*Load the file into memory & decode. (libTIFF, data stored in buffer as ABRG)
+*Convert colorspace
+  *can be done on load by overriding the 'put' method of libtiff.
+
+*Lowpass the Cb and Cr channels using a 3x3 stencil. (seperable)
+*if P frame:
+  *Do motion vector search (see previous doodle)
+  *compute the deltas
+*downsample the Cb and Cr channel (if we have an I frame we could do this together with downsampling)
+*convert all channels to frequency domain
+*quantize all channels
+*extract dc component and compute differences for all channels
+
+(this bit probably better on CPU)
+*change ordering to zig-zag
+*encode coefficients
+
+
+
+
+
+max performance:
+ assume 3 byte per pixel, Rx8,Gx8,Bx8, @ 25.6 GB/s = 8.53 GPixel/s memory bound
+ peak theoretical GFLOPS: 832. source: http://www.anandtech.com/show/6993/intel-iris-pro-5200-graphics-review-core-i74950hq-tested/2
+  also note: multiple SIMD units, prefered width = 4.
+ so about 100 flops per pixel to break even in time spend on compute and transfer (one way).
+ so start by optimizing heavily for memory access.
