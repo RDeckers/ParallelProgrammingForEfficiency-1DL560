@@ -1,0 +1,52 @@
+\documentclass{beamer}
+% logo of my university
+\title{Optimizing MPEG Encoding}
+\author{Jin Wen Ting, {\em Roel Deckers}}
+\institute{Uppsala University}
+\begin{document}
+
+\begin{frame}
+\titlepage
+\end{frame}
+\begin{frame}
+  \frametitle{The Problem}
+  \begin{figure}
+  \includegraphics[width=0.8\textwidth]{images/runtime}
+  \caption{Acces pattern for a single tile. Order in blue, dependant iterations in red.}
+  \end{figure}
+\end{frame}
+\begin{frame}
+  \frametitle{Key Optimizations}
+  \begin{itemize}
+    \item{Load a images from disk in the background,}
+    \item{Use shared global memory for the GPU and CPU using {\em clEnqueueMapBuffer}\footnote{This may however be bugged\ldots},}
+    \item{Perform everything up to and including motion vector search on the GPU, combining as much as possible}
+    \item{Optimize encoding on the CPU.}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}
+  \frametitle{MVS: Our approach}
+  \begin{figure}
+  \includegraphics[width=0.6\textwidth]{images/grid}
+  \caption{Acces pattern for a single tile. Order in blue, dependant iterations in red.}
+  \end{figure}
+\end{frame}
+
+\begin{frame}
+  \frametitle{MVS: Our approach}
+  \begin{itemize}
+    \item{
+  \end{itemize}
+\end{frame}
+
+\begin{frame}
+  \frametitle{Open questions}
+  \begin{itemize}
+    \item{At what point in the pipeline is it best to switch back to CPU?}
+    \item{How flexible are the SIMD units on intel GPUs?}
+    \item{What is the ideal number of tiles to proccess in one workgroup?}
+  \end{itemize}
+\end{frame}
+
+\end{document}
