@@ -47,7 +47,7 @@ OBJ_FILES = $(patsubst $(SRC_DIR)/common/%.cpp,$(OBJ_DIR)/%.o,$(COMMON_CPP_FILES
 DATA_FILES := $(patsubst $(PLOTS_DIR)/%.gnuplot,$(DATA_DIR)/%.dat,$(PLOTS_GNUPLOT))
 
 LD_FLAGS += --std=c++11 -march=native -lOpenCL -lclu -lutilities -lm -ltiff -lxml2 -L $(INSTALL_LIB_DIR)
-CPP_FLAGS += --std=c++11 -O2 -pipe -march=native -I $(PROJECT_DIR)headers -I $(INSTALL_INCLUDE_DIR) -I /usr/include/libxml2 -I Z:/msys64/mingw64/include/libxml2/
+CPP_FLAGS += --std=c++11 -g -O2 -pipe -march=native -I $(PROJECT_DIR)headers -I $(INSTALL_INCLUDE_DIR) -I /usr/include/libxml2 -I Z:/msys64/mingw64/include/libxml2/
 
 .SECONDARY: $(OBJ_FILES) $(DATA_FILES)
 
