@@ -20,6 +20,8 @@ using namespace std;
 
 cl_command_queue *com_qs = NULL;
 cl_kernel kernel;
+cl_kernel kernel_lowPass_X;
+cl_kernel kernel_lowPass_Y;
 size_t work_dim;
 size_t work_item_dim;
 
@@ -467,6 +469,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     int width = frame_rgb->width;
     int height = frame_rgb->height;
     int npixels = width*height;
+    int npixels_lowPass = (width-2)*(height-2);
 
     delete frame_rgb;
 
@@ -537,6 +540,24 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
     }
 
+    //buffer for lowPass
+    mem_X_IN = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels_lowPass*sizeof(float), nullptr, &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    mem_X_OUT = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels_lowPass*sizeof(float), nullptr, &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
+    }
+
+     mem_Y_IN = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels_lowPass*sizeof(float), nullptr, &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    mem_Y_OUT = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels_lowPass*sizeof(float), nullptr, &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
+    }
 
     char *program_src = NULL;
     cl_program program = cluProgramFromFilename(context, "../resources/kernels/encoder.cl");
@@ -590,7 +611,33 @@ void zigZagOrder(Channel* in, Channel* ordered) {
   // if(CL_SUCCESS != ret){
   //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
   // }
+    
+    kernel_lowPass_X = clCreateKernel(program, "lowPass_X", &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
+    }
 
+    ret = clSetKernelArg(kernel_lowPass_X, 0, sizeof(cl_mem), (void *)&mem_X_IN);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+   
+    ret = clSetKernelArg(kernel_lowPass_X, 1, sizeof(cl_mem), (void *)&mem_X_OUT);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+
+    kernel_lowPass_Y = clCreateKernel(program, "lowPass_Y", &ret);
+    ret = clSetKernelArg(kernel_lowPass_Y, 0, sizeof(cl_mem), (void *)&mem_Y_IN);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+   
+    ret = clSetKernelArg(kernel_lowPass_Y, 1, sizeof(cl_mem), (void *)&mem_Y_OUT);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    
     /*/////////////////
     // END OPENCL INIT
     ///////////////*/
@@ -629,8 +676,14 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       Channel* frame_blur_cr = new Channel(width, height);
       Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
 
-      lowPass(frame_ycbcr->gc, frame_blur_cb);
-      lowPass(frame_ycbcr->bc, frame_blur_cr);
+      lowPass_X_cl(frame_ycbcr->gc, frame_blur_cb);
+      lowPass_Y_cl(frame_ycbcr->gc, frame_blur_cb);
+      
+      lowPass_X_cl(frame_ycbcr->bc, frame_blur_cr);
+      lowPass_Y_cl(frame_ycbcr->bc, frame_blur_cr);
+      //lowPass(frame_ycbcr->gc, frame_blur_cb);
+      //lowPass(frame_ycbcr->bc, frame_blur_cr);
+      
       //Y frame doesn;t get touched.
       frame_lowpassed->Y->copy(frame_ycbcr->rc);
       frame_lowpassed->Cb->copy(frame_blur_cb);
