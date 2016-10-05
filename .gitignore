@@ -2,6 +2,8 @@
 *.dll
 *.xml
 *.vsp
+*/bin/*
+*/obj/*
 lab_01/c_encoder/ppe/ppe.*
 lab_01/c_encoder/ppe.*
 lab_01/c_encoder/ppe/Debug/*
