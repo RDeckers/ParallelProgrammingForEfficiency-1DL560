@@ -524,7 +524,8 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     int width = frame_rgb->width;
     int height = frame_rgb->height;
     int npixels = width*height;
-    int npixels_lowPass = (width-2)*(height-2);
+    int npixels_lowPass = npixels;
+    //int npixels_lowPass = (width-2)*(height-2);
 
     delete frame_rgb;
 
@@ -713,11 +714,24 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
 
       lowPass_cl();
-      
+
       //Y frame doesn;t get touched.
-      frame_lowpassed->Y->copy(frame_ycbcr->rc);
-      frame_lowpassed->Cb->copy(frame_blur_cb);
-      frame_lowpassed->Cr->copy(frame_blur_cr);
+
+      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Y, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Y->data, 0, NULL, NULL))){
+	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
+	return;
+      }
+      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cb->data, 0, NULL, NULL))){
+	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
+	return;
+      }
+      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->cr->data, 0, NULL, NULL))){
+	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
+	return;
+      }
+      //frame_lowpassed->Y->copy(frame_ycbcr->rc);
+      //frame_lowpassed->Cb->copy(frame_blur_cb);
+      //frame_lowpassed->Cr->copy(frame_blur_cr);
       runtime[1] = tock(&clock);
 
       dump_frame(frame_lowpassed, "frame_ycbcr_lowpass", frame_number);
