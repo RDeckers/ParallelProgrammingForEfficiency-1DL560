@@ -23,8 +23,8 @@ cl_command_queue *com_qs = NULL;
 cl_kernel kernel;
 cl_kernel kernel_lowPass_X;
 cl_kernel kernel_lowPass_Y;
-size_t work_dim;
-size_t work_item_dim;
+size_t work_dim[2];
+size_t work_item_dim[2];
 
 cl_mem mem_R;
 cl_mem mem_G;
@@ -106,7 +106,7 @@ void convertRGBtoYCbCr_cl(
   clFinish(com_qs[0]);
 
   //enque the kernel
-  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel, 1, NULL, &work_dim, &work_item_dim, 0, NULL, NULL))){
+  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel, 1, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
         report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
         return;
   }
@@ -138,18 +138,18 @@ void lowPass_cl(){
   ///for Cb
   //in X
   clSetKernelArg(kernel_lowPass_X, 0, sizeof(cl_mem), (void *)&mem_Cb);
-  clSetKernelArg(kernel_lowPass_X, 1, sizeof(cl_mem), (void *)&mem_lowPass);  
+  clSetKernelArg(kernel_lowPass_X, 1, sizeof(cl_mem), (void *)&mem_lowPass);
   //enque the kernel
-  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_X, 2, NULL, &work_dim, &work_item_dim, 0, NULL, NULL))){
+  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_X, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
         report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
         return;
   }
   clFinish(com_qs[0]);
-  
+
   //in Y
   clSetKernelArg(kernel_lowPass_Y, 0, sizeof(cl_mem), (void *)&mem_lowPass);
   clSetKernelArg(kernel_lowPass_Y, 1, sizeof(cl_mem), (void *)&mem_Cb);
-  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_Y, 2, NULL, &work_dim, &work_item_dim, 0, NULL, NULL))){
+  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_Y, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
         report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
         return;
   }
@@ -163,21 +163,21 @@ void lowPass_cl(){
   clSetKernelArg(kernel_lowPass_X, 0, sizeof(cl_mem), (void *)&mem_Cr);
   clSetKernelArg(kernel_lowPass_X, 1, sizeof(cl_mem), (void *)&mem_lowPass);
   //enque the kernel
-  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_X, 2, NULL, &work_dim, &work_item_dim, 0, NULL, NULL))){
+  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_X, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
     report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
     return;
   }
   clFinish(com_qs[0]);
-  
+
   //in Y
   clSetKernelArg(kernel_lowPass_Y, 0, sizeof(cl_mem), (void *)&mem_lowPass);
   clSetKernelArg(kernel_lowPass_Y, 1, sizeof(cl_mem), (void *)&mem_Cr);
-  
-  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_Y, 2, NULL, &work_dim, &work_item_dim, 0, NULL, NULL))){
+
+  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_Y, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
     report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
     return;
   }
-  clFinish(com_qs[0]);  
+  clFinish(com_qs[0]);
 }
 
 
@@ -567,8 +567,6 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     cluCreateCommandQueues(context, devices, device_count, &com_qs);
     report(PASS, "Command queues created");
 
-    work_dim = npixels;
-    work_item_dim = 256;
     cl_int ret;
     mem_R = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
@@ -597,7 +595,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     }
 
     //buffer for lowPass
-    mem_lowPass = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY, npixels_lowPass*sizeof(float), nullptr, &ret);
+    mem_lowPass = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels_lowPass*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (lowPass) returned: %s (%d)", cluErrorString(ret), ret);
     }
@@ -668,13 +666,16 @@ void zigZagOrder(Channel* in, Channel* ordered) {
   // if(CL_SUCCESS != ret){
   //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
   // }
-    
+
     kernel_lowPass_X = clCreateKernel(program, "lowPass_X", &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
     }
 
     kernel_lowPass_Y = clCreateKernel(program, "lowPass_Y", &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
+    }
     /*/////////////////
     // END OPENCL INIT
     ///////////////*/
@@ -692,6 +693,8 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       //  Convert to YCbCr
       report(INFO, "Covert to YCbCr...");
       Image* frame_ycbcr = new Image(width, height, FULLSIZE);
+      work_dim[0] = npixels;
+      work_item_dim[0] = 512;
       tick(&clock);
       //convert all channels colorspace
       convertRGBtoYCbCr_cl(frame_rgb, frame_ycbcr);
@@ -705,29 +708,31 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
       // We low pass filter Cb and Cr channesl
       report(INFO, "Low pass filter...");
-
+      work_item_dim[0] = 32;
+      work_item_dim[1] = 16;
+      work_dim[0] = frame_ycbcr->width;
+      work_dim[1] = frame_ycbcr->height;
       //TODO: split up channels for better memory locality.
       tick(&clock);
       //lowpass only Cb and Cr
-      Channel* frame_blur_cb = new Channel(width, height);
-      Channel* frame_blur_cr = new Channel(width, height);
       Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
 
       lowPass_cl();
 
       //Y frame doesn;t get touched.
 
+
       if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Y, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Y->data, 0, NULL, NULL))){
 	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
-	return;
+	return -1;
       }
       if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cb->data, 0, NULL, NULL))){
 	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
-	return;
+	return -1;
       }
-      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->cr->data, 0, NULL, NULL))){
+      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cr->data, 0, NULL, NULL))){
 	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
-	return;
+	return -1;
       }
       //frame_lowpassed->Y->copy(frame_ycbcr->rc);
       //frame_lowpassed->Cb->copy(frame_blur_cb);
@@ -736,8 +741,8 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
       dump_frame(frame_lowpassed, "frame_ycbcr_lowpass", frame_number);
       delete frame_ycbcr;
-      delete frame_blur_cb;
-      delete frame_blur_cr;
+      // delete frame_blur_cb;
+      // delete frame_blur_cr;
 
       Frame *frame_lowpassed_final = NULL;
       //uses Cb/Cr at full resolution
