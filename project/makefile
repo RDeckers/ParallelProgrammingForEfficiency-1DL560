@@ -44,7 +44,7 @@ BINARIES := $(patsubst $(SRC_DIR)/%.cpp,$(BIN_DIR)/%$(BINARY_EXTENSION),$(CPP_FI
 
 COMMON_CPP_FILES := $(wildcard $(SRC_DIR)/common/*.cpp)
 OBJ_FILES = $(patsubst $(SRC_DIR)/common/%.cpp,$(OBJ_DIR)/%.o,$(COMMON_CPP_FILES))
-DATA_FILES := $(patsubst $(PLOTS_DIR)/%.gnuplot,$(DATA_DIR)/%.dat,$(PLOTS_GNUPLOT))
+DATA_FILES := $(patsubst $(BIN_DIR)/%$(BINARY_EXTENSION),$(DATA_DIR)/%.dat,$(BINARIES))
 
 LD_FLAGS += --std=c++11 -march=native -lOpenCL -lclu -lutilities -lm -ltiff -lxml2 -L $(INSTALL_LIB_DIR)
 CPP_FLAGS += --std=c++11 -g -O2 -pipe -march=native -I $(PROJECT_DIR)headers -I $(INSTALL_INCLUDE_DIR) -I /usr/include/libxml2 -I Z:/msys64/mingw64/include/libxml2/

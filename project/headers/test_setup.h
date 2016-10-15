@@ -15,9 +15,8 @@
 // Use these settings for profiling optimizaitons
 //
  #define N_FRAMES 10
- #define I_FRAME_FREQ 1
+ #define I_FRAME_FREQ 4
  #define DUMP_TO_DEBUG false
- #define image_name "solar4k"
-
+ #define image_name "solar"
 
 #endif

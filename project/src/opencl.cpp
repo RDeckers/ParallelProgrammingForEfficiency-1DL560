@@ -15,9 +15,27 @@
 #include <utilities/file.h>
 #include <utilities/logging.h>
 #include <utilities/benchmarking.h>
+#include <algorithm>
 
 
 using namespace std;
+
+
+ double setup_t = 0; //time for setting up openCL
+ double loadImage_t[N_FRAMES];//time spend getting image from disc
+ double transfer_t[N_FRAMES];//Time spend transfering data to and from the GPU
+ double convert_t[N_FRAMES];//Time spend on color conversion
+ double lowpass_t[N_FRAMES];
+ double mvs_t[N_FRAMES];//motionVectorSearch
+ double computeDelta_t[N_FRAMES];
+ double downsample_t[N_FRAMES];
+ double convertFreq_t[N_FRAMES];
+ double quant_t[N_FRAMES];
+ double extract_t[N_FRAMES];
+ double zigzag_t[N_FRAMES];
+ double encode_t[N_FRAMES];
+ double total_i_t[N_FRAMES]; //total time for iframes
+ double total_p_t[N_FRAMES]; //total time for pframes
 
 cl_command_queue *com_qs = NULL;
 cl_kernel kernel;
@@ -87,10 +105,7 @@ void loadImage(int number, string path, Image** photo) {
 }
 
 
-void convertRGBtoYCbCr_cl(
-  Image* in, Image *out
-){
-  //enque writting the input
+void uploadData_cl(Image* in){
   cl_int ret = clEnqueueWriteBuffer(com_qs[0], mem_R, CL_FALSE, 0, in->rc->size_in_bytes(), in->rc->data, 0, NULL, NULL);
   if(CL_SUCCESS != ret){
     report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
@@ -104,26 +119,31 @@ void convertRGBtoYCbCr_cl(
     report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
   }
   clFinish(com_qs[0]);
+}
 
-  //enque the kernel
+void readbackData_cl(Frame *out){
+  //enque reading the output
+  cl_int ret = clEnqueueReadBuffer(com_qs[0], mem_Y, CL_FALSE, 0, out->Y->size_in_bytes(), out->Y->data, 0, NULL, NULL);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  ret = clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_FALSE, 0, out->Cb->size_in_bytes(), out->Cb->data, 0, NULL, NULL);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  ret = clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_FALSE, 0, out->Cr->size_in_bytes(), out->Cr->data, 0, NULL, NULL);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  clFinish(com_qs[0]);
+}
+
+void convertRGBtoYCbCr_cl(
+){
+  cl_int ret;
   if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel, 1, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
         report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
         return;
-  }
-  clFinish(com_qs[0]);
-
-  //enque reading the output
-  ret = clEnqueueReadBuffer(com_qs[0], mem_Y, CL_FALSE, 0, out->rc->size_in_bytes(), out->rc->data, 0, NULL, NULL);
-  if(CL_SUCCESS != ret){
-    report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
-  }
-  ret = clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_FALSE, 0, out->gc->size_in_bytes(), out->gc->data, 0, NULL, NULL);
-  if(CL_SUCCESS != ret){
-    report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
-  }
-  ret = clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_FALSE, 0, out->bc->size_in_bytes(), out->bc->data, 0, NULL, NULL);
-  if(CL_SUCCESS != ret){
-    report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
   }
   clFinish(com_qs[0]);
   //wait for it to finish.
@@ -155,8 +175,6 @@ void lowPass_cl(){
   }
   clFinish(com_qs[0]);
   //wait for it to finish.
-
-
 
   ///for Cr
   //in X
@@ -514,7 +532,6 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     string stream_path = "../outputs/stream_c_" + string(image_name) + ".xml";
 
     xmlDocPtr stream = NULL;
-
     Image* frame_rgb = NULL;
     Image* previous_frame_rgb = NULL;
     Frame* previous_frame_lowpassed = NULL;
@@ -532,9 +549,9 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     int end_frame = int(N_FRAMES);
     int i_frame_frequency = int(I_FRAME_FREQ);
     //struct timeval starttime, endtime;
-    struct timespec clock;
-    double runtime[10] = {0};
-
+    struct timespec clock, total_clock;
+    //double runtime[10] = {0};
+    tick(&clock);
     cl_platform_id *platforms = NULL;
     cl_device_id *devices = NULL;
     cl_uint n_platforms = cluGetPlatforms(&platforms, CLU_DYNAMIC);
@@ -679,16 +696,21 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     /*/////////////////
     // END OPENCL INIT
     ///////////////*/
-    // Hardcoded paths
+    setup_t = elapsed_since(&clock);
 
-
-    createStatsFile();
     stream = create_xml_stream(width, height, QUALITY, WINDOW_SIZE, BLOCK_SIZE);
     vector<mVector>* motion_vectors = NULL;
 
     for (int frame_number = 0 ; frame_number < end_frame ; frame_number++) {
       frame_rgb = NULL;
+      tick(&total_clock);
+      tick(&clock);
       loadImage(frame_number, image_path, &frame_rgb);
+      loadImage_t[frame_number] = elapsed_since(&clock);
+
+      tick(&clock);
+      uploadData_cl(frame_rgb);
+      transfer_t[frame_number] = elapsed_since(&clock);
 
       //  Convert to YCbCr
       report(INFO, "Covert to YCbCr...");
@@ -696,15 +718,10 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       work_dim[0] = npixels;
       work_item_dim[0] = 512;
       tick(&clock);
-      //convert all channels colorspace
-      convertRGBtoYCbCr_cl(frame_rgb, frame_ycbcr);
-      //convertRGBtoYCbCr_inplace(frame_rgb);
-
-      runtime[0] = tock(&clock);
-      //Image* frame_ycbcr = frame_rgb;
-      //frame_rgb = nullptr;
-      dump_image(frame_ycbcr, "frame_ycbcr", frame_number);
-      delete frame_rgb;
+      convertRGBtoYCbCr_cl();
+      convert_t[frame_number] = elapsed_since(&clock);
+//      dump_image(frame_ycbcr, "frame_ycbcr", frame_number);
+//    delete frame_rgb;
 
       // We low pass filter Cb and Cr channesl
       report(INFO, "Low pass filter...");
@@ -712,37 +729,19 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       work_item_dim[1] = 16;
       work_dim[0] = frame_ycbcr->width;
       work_dim[1] = frame_ycbcr->height;
-      //TODO: split up channels for better memory locality.
-      tick(&clock);
       //lowpass only Cb and Cr
       Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
-
+      tick(&clock);
       lowPass_cl();
+      lowpass_t[frame_number] = elapsed_since(&clock);
 
-      //Y frame doesn;t get touched.
-
-
-      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Y, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Y->data, 0, NULL, NULL))){
-	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
-	return -1;
-      }
-      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cb->data, 0, NULL, NULL))){
-	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
-	return -1;
-      }
-      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cr->data, 0, NULL, NULL))){
-	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
-	return -1;
-      }
-      //frame_lowpassed->Y->copy(frame_ycbcr->rc);
-      //frame_lowpassed->Cb->copy(frame_blur_cb);
-      //frame_lowpassed->Cr->copy(frame_blur_cr);
-      runtime[1] = tock(&clock);
+      //readback the data
+      tick(&clock);
+      readbackData_cl(frame_lowpassed);
+      transfer_t[frame_number] += elapsed_since(&clock);
 
       dump_frame(frame_lowpassed, "frame_ycbcr_lowpass", frame_number);
-      delete frame_ycbcr;
-      // delete frame_blur_cb;
-      // delete frame_blur_cr;
+      delete frame_rgb;
 
       Frame *frame_lowpassed_final = NULL;
       //uses Cb/Cr at full resolution
@@ -755,12 +754,12 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
         tick(&clock);
         motion_vectors = motionVectorSearch(previous_frame_lowpassed, frame_lowpassed, frame_lowpassed->width, frame_lowpassed->height);
-        runtime[2] =  tock(&clock);
+        mvs_t[frame_number] = elapsed_since(&clock);
 
         report(INFO, "Compute Delta...");
         tick(&clock);
         frame_lowpassed_final = computeDelta(previous_frame_lowpassed, frame_lowpassed, motion_vectors);
-        runtime[3] = tock(&clock);
+        computeDelta_t[frame_number] = elapsed_since(&clock);
 
       } else {
         // We have a I frame
@@ -781,7 +780,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       frame_downsampled->Y->copy(frame_lowpassed_final->Y);
       tick(&clock);
       downSample_frame(frame_lowpassed_final, frame_downsampled);
-      runtime[4] = tock(&clock);
+      downsample_t[frame_number] = elapsed_since(&clock);
 
       dump_frame(frame_downsampled, "frame_downsampled", frame_number);
       delete frame_lowpassed_final;
@@ -791,13 +790,13 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       // Convert to frequency domain
       report(INFO, "Convert to frequency domain...");
 
-      tick(&clock);
       Frame* frame_dct = new Frame(width, height, DOWNSAMPLE);
 
+      tick(&clock);
       dct8x8(frame_downsampled->Y, frame_dct->Y);
       dct8x8(frame_downsampled->Cb, frame_dct->Cb);
       dct8x8(frame_downsampled->Cr, frame_dct->Cr);
-      runtime[5] = tock(&clock);
+      convertFreq_t[frame_number] = elapsed_since(&clock);
 
       dump_frame(frame_dct, "frame_dct", frame_number);
       delete frame_downsampled;
@@ -805,13 +804,13 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       //Quantize the data
       report(INFO, "Quantize...");
 
-      tick(&clock);
       Frame* frame_quant = new Frame(width, height, DOWNSAMPLE);
 
+      tick(&clock);
       quant8x8(frame_dct->Y, frame_quant->Y);
       quant8x8(frame_dct->Cb, frame_quant->Cb);
       quant8x8(frame_dct->Cr, frame_quant->Cr);
-      runtime[6] = tock(&clock);
+      quant_t[frame_number] = elapsed_since(&clock);
 
       dump_frame(frame_quant, "frame_quant", frame_number);
       delete frame_dct;
@@ -819,26 +818,26 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       //Extract the DC components and compute the differences
       report(INFO, "Compute DC differences...");
 
-      tick(&clock);
+
       Frame* frame_dc_diff = new Frame(1, (width/8)*(height/8), DCDIFF); //dealocate later
 
+      tick(&clock);
       dcDiff(frame_quant->Y, frame_dc_diff->Y);
       dcDiff(frame_quant->Cb, frame_dc_diff->Cb);
       dcDiff(frame_quant->Cr, frame_dc_diff->Cr);
-      runtime[7] = tock(&clock);
+      extract_t[frame_number] = elapsed_since(&clock);
 
       dump_dc_diff(frame_dc_diff, "frame_dc_diff", frame_number);
 
       // Zig-zag order for zero-counting
       report(INFO, "Zig-zag order...");
-      tick(&clock);
-
       Frame* frame_zigzag = new Frame(MPEG_CONSTANT, width*height/MPEG_CONSTANT, ZIGZAG);
 
+      tick(&clock);
       zigZagOrder(frame_quant->Y, frame_zigzag->Y);
       zigZagOrder(frame_quant->Cb, frame_zigzag->Cb);
       zigZagOrder(frame_quant->Cr, frame_zigzag->Cr);
-      runtime[8] = tock(&clock);
+      zigzag_t[frame_number] = elapsed_since(&clock);
 
       dump_zigzag(frame_zigzag, "frame_zigzag", frame_number);
       delete frame_quant;
@@ -846,15 +845,22 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       // Encode coefficients
       report(INFO, "Encode coefficients...");
 
-      tick(&clock);
       FrameEncode* frame_encode = new FrameEncode(width, height, MPEG_CONSTANT);
 
+      tick(&clock);
       encode8x8(frame_zigzag->Y, frame_encode->Y);
       encode8x8(frame_zigzag->Cb, frame_encode->Cb);
       encode8x8(frame_zigzag->Cr, frame_encode->Cr);
-      runtime[9] = tock(&clock);
+      encode_t[frame_number] = elapsed_since(&clock);
 
       delete frame_zigzag;
+      if (frame_number % i_frame_frequency != 0){
+        total_p_t[frame_number] = elapsed_since(&total_clock);
+        total_p_t[frame_number] += -loadImage_t[frame_number]-transfer_t[frame_number]-convert_t[frame_number]-lowpass_t[frame_number]-mvs_t[frame_number]-computeDelta_t[frame_number]-downsample_t[frame_number]-convertFreq_t[frame_number]-quant_t[frame_number]-extract_t[frame_number]-zigzag_t[frame_number]-encode_t[frame_number];
+      }else{
+        total_i_t[frame_number] = elapsed_since(&total_clock);
+        total_i_t[frame_number] += -loadImage_t[frame_number]-transfer_t[frame_number]-convert_t[frame_number]-lowpass_t[frame_number]-downsample_t[frame_number]-convertFreq_t[frame_number]-quant_t[frame_number]-extract_t[frame_number]-zigzag_t[frame_number]-encode_t[frame_number];
+      }
 
       stream_frame(stream, frame_number, motion_vectors, frame_number-1, frame_dc_diff, frame_encode);
       write_stream(stream_path, stream);
@@ -866,19 +872,77 @@ void zigZagOrder(Channel* in, Channel* ordered) {
         free(motion_vectors);
         motion_vectors = NULL;
       }
-
-      writestats(frame_number, frame_number % i_frame_frequency, runtime);
     }
 
-    closeStats();
-    /* Uncoment to prevent visual studio output window from closing */
-    //system("pause");
-
+    std::sort(loadImage_t, loadImage_t+N_FRAMES);
+    std::sort(transfer_t, transfer_t+N_FRAMES);
+    std::sort(convert_t, convert_t+N_FRAMES);
+    std::sort(lowpass_t, lowpass_t+N_FRAMES);
+    std::sort(mvs_t, mvs_t+N_FRAMES);
+    std::sort(computeDelta_t, computeDelta_t+N_FRAMES);
+    std::sort(downsample_t, downsample_t+N_FRAMES);
+    std::sort(convertFreq_t, convertFreq_t+N_FRAMES);
+    std::sort(quant_t, quant_t+N_FRAMES);
+    std::sort(extract_t, extract_t+N_FRAMES);
+    std::sort(zigzag_t, zigzag_t+N_FRAMES);
+    std::sort(encode_t, encode_t+N_FRAMES);
+    std::sort(total_i_t, total_i_t+N_FRAMES);
+    std::sort(total_p_t, total_p_t+N_FRAMES);
+    printf("#pixels: %u, frames: %d, i_frame_frequency: %d\n", width*height, N_FRAMES, i_frame_frequency);
+    printf("setup %.4e\n", setup_t);
+    printf("loadImage %.4e\n", loadImage_t[0]);
+    printf("transfer %.4e\n", transfer_t[0]);
+    printf("convert %.4e\n", convert_t[0]);
+    printf("lowpass %.4e\n", lowpass_t[0]);
+    printf("mvs %.4e\n", mvs_t[0]);
+    printf("computeDelta %.4e\n", computeDelta_t[0]);
+    printf("downsample %.4e\n", downsample_t[0]);
+    printf("convertFreq %.4e\n", convertFreq_t[0]);
+    printf("quant %.4e\n", quant_t[0]);
+    printf("extract %.4e\n", extract_t[0]);
+    printf("zigzag %.4e\n", zigzag_t[0]);
+    printf("encode %.4e\n", encode_t[0]);
+    printf("overhead_i %.4e\n", total_i_t[0]);
+    printf("overhead_p %.4e\n", total_p_t[0]);
+    // printf("%u %.4e %.4e %.4e %.4e %.4e %.4e  %.4e %.4e %.4e %.4e %.4e %.4e %.4e %.4e %.4e\n",
+    //  width*height,
+    //   setup_t,
+    //   loadImage_t[0],
+    //   transfer_t[0],
+    //   convert_t[0],
+    //   lowpass_t[0],
+    //   mvs_t[0],
+    //   computeDelta_t[0],
+    //   downsample_t[0],
+    //   convertFreq_t[0],
+    //   quant_t[0],
+    //   extract_t[0],
+    //   zigzag_t[0],
+    //   encode_t[0],
+    //   total_i_t[0],
+    //   total_p_t[0]
+    // );
     return 0;
   }
 
 
   int main(int args, char** argv){
+    for(int i = 0; i < N_FRAMES; i++){
+      loadImage_t[i] = 1e200;
+      transfer_t[i] = 1e200;
+      convert_t[i] = 1e200;
+      lowpass_t[i] = 1e200;
+      mvs_t[i] = 1e200;
+      computeDelta_t[i] = 1e200;
+      downsample_t[i] = 1e200;
+      convertFreq_t[i] = 1e200;
+      quant_t[i] = 1e200;
+      extract_t[i] = 1e200;
+      zigzag_t[i] = 1e200;
+      encode_t[i] = 1e200;
+      total_i_t[i] = 1e200;
+      total_p_t[i] = 1e200;
+    }
     encode();
     return 0;
   }

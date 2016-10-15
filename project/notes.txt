@@ -1,3 +1,14 @@
+* test correctness
+* Copy the benchmarking code.
+
+* Load images in the background.
+* Do lowpass and conversion in 1 pass.
+* Optimize motionVectorSearch
+* (possibly merge mvs and conversion/lowpass)
+* (possibley merge downsample)
+* Optimize the other functions for CPU usage
+
+
 use asynchronous I/O to load images in the background
 
 upload images to the GPU, instead of data buffers
@@ -26,23 +37,31 @@ Motion vector search:
 
 General algorithm:
 ========================
-*Load the file into memory & decode. (libTIFF, data stored in buffer as ABRG)
-*Convert colorspace
-  *can be done on load by overriding the 'put' method of libtiff.
 
-*Lowpass the Cb and Cr channels using a 3x3 stencil. (seperable)
+*Load the file into memory & decode. (libTIFF, data stored in buffer as ABRG) -R
+
+{
+  *Convert colorspace
+    *can be done on load by overriding the 'put' method of libtiff.
+    *Lowpass the Cb and Cr channels using a 3x3 stencil. (seperable)
+}W
+{
 *if P frame:
-  *Do motion vector search (see previous doodle)
-  *compute the deltas
+ *Do motion vector search (see previous doodle)
+ *compute the deltas
+}R
+
 *downsample the Cb and Cr channel (if we have an I frame we could do this together with downsampling)
-*convert all channels to frequency domain
-*quantize all channels
-*extract dc component and compute differences for all channels
-
+{
+ *convert all channels to frequency domain
+ *quantize all channels
+ *extract dc component and compute differences for all channels
+}R
 (this bit probably better on CPU)
-*change ordering to zig-zag
-*encode coefficients
-
+{
+  *ZigZagOrder
+  *encode coefficients
+}W
 
 
 
