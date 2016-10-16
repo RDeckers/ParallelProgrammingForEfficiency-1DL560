@@ -1,5 +1,5 @@
 
-#include "PipeLineConstants.h"
+#include "../resources/kernels/PipeLineConstants.h"
 //
 // Hard code kernel work group size, useful for static local memory allocation
 //
