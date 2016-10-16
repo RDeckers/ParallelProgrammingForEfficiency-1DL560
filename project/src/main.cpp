@@ -540,10 +540,10 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     pipeline_kernel = clCreateKernel(program, "RGB2YCbCr_LowPassFilter_pipeline", &ret);
     ErrorCheck(ret);
     //
-    // Setup the arguments: 
+    // Setup the arguments:
     //
     //
-    // Inputs: 
+    // Inputs:
     //
     ErrorCheck(clSetKernelArg(pipeline_kernel, 0, sizeof(cl_mem), (void *)&mem_R) );
     ErrorCheck(clSetKernelArg(pipeline_kernel, 1, sizeof(cl_mem), (void *)&mem_G) );
@@ -561,15 +561,22 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     ErrorCheck(clSetKernelArg(pipeline_kernel, 7, sizeof(int), (void *)&image_cols) );  //image_clos == image-in->width
 
   }
-  void RunPipelineKernel(int rows, int cols)
+  void RunPipelineKernel(unsigned rows, unsigned cols)
   {
 
     work_item_dim[0] = DIM_X; // ex 64 - in fast x-dimension
     work_item_dim[1] = DIM_Y; // ex 8
     work_dim[0] = cols;   // x-direction
     work_dim[1] = rows;
+    report(INFO, "trying to run kernel with [%u, %u] and [%u, %u]", DIM_X, DIM_Y, cols, rows);
     //enque the kernel
-    ErrorCheck( clEnqueueNDRangeKernel(com_qs[0], pipeline_kernel, 1, NULL, work_dim, work_item_dim, 0, NULL, NULL) );
+    cl_int ret;
+    if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], pipeline_kernel, 1, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
+      report(FAIL, "clEnqueueNDRangeKernel(pipeline) returned: %s (%d)", cluErrorString(ret), ret);
+      exit(-1);
+    }
+    clFinish(com_qs[0]);
+
   }
 
   int encode() {
@@ -696,64 +703,10 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     //
     // Setup the pipeline kernel
     //
-    int rows = frame_rgb->height;
-    int cols = frame_rgb->width;
-    setupPipelineKernel(program, rows, cols);
+    //int rows = frame_rgb->height;
+    //int cols = frame_rgb->width;
+    setupPipelineKernel(program, height, width);
 
-    /*
-    kernel = clCreateKernel(program, "convertRGBtoYCbCr", &ret);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
-    }
-
-    ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&mem_R);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&mem_G);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&mem_B);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-
-    ret = clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)&mem_Y);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel, 4, sizeof(cl_mem), (void *)&mem_Cb);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel, 5, sizeof(cl_mem), (void *)&mem_Cr);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-
-    */
-
-  // ret = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&mem_B);
-  // if(CL_SUCCESS != ret){
-  //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-  // }
-  // ret = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&mem_C);
-  // if(CL_SUCCESS != ret){
-  //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-  // }
-
-    /*
-    kernel_lowPass_X = clCreateKernel(program, "lowPass_X", &ret);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
-    }
-
-    kernel_lowPass_Y = clCreateKernel(program, "lowPass_Y", &ret);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    */
     /*/////////////////
     // END OPENCL INIT
     ///////////////*/
@@ -775,50 +728,22 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       //
       // Run kernel pipeline!
       //
-      RunPipelineKernel(rows, cols);
+      RunPipelineKernel(height, width);
 
       // This is where convert and low-pass are done
       // the filtered data now resided in Y Cb Cr buffers on the GPU
 
-      /*
-      //  Convert to YCbCr
-      report(INFO, "Covert to YCbCr...");
-      work_dim[0] = npixels;
-      work_item_dim[0] = 512;
-      tick(&clock);
-      //convert all channels colorspace
-      convertRGBtoYCbCr_cl(frame_rgb, frame_ycbcr);
-      //convertRGBtoYCbCr_inplace(frame_rgb);
-
-      runtime[0] = tock(&clock);
-      //Image* frame_ycbcr = frame_rgb;
-      //frame_rgb = nullptr;
-      dump_image(frame_ycbcr, "frame_ycbcr", frame_number);
-      delete frame_rgb;
-
-      // We low pass filter Cb and Cr channesl
-      report(INFO, "Low pass filter...");
-      work_item_dim[0] = 32;
-      work_item_dim[1] = 16;
-      work_dim[0] = frame_ycbcr->width;
-      work_dim[1] = frame_ycbcr->height;
-      //TODO: split up channels for better memory locality.
-      tick(&clock);
-      //
-      //lowpass only Cb and Cr
-      //
-      // FIXME: Dont include unnecessary memory allocation in loop 
+      // FIXME: Dont include unnecessary memory allocation in loop
       //        this allocation can be done only once?
 
-      lowPass_cl();
-      */
+      //lowPass_cl();
       Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
       //Image* frame_ycbcr = new Image(width, height, FULLSIZE);
 
       ErrorCheck( clEnqueueReadBuffer(com_qs[0], mem_Y, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Y->data, 0, NULL, NULL) );
       ErrorCheck( clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cb->data, 0, NULL, NULL) );
       ErrorCheck( clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cr->data, 0, NULL, NULL) );
-  
+
 
       //frame_lowpassed->Y->copy(frame_ycbcr->rc);
       //frame_lowpassed->Cb->copy(frame_blur_cb);
