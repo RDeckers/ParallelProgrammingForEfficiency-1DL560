@@ -696,8 +696,8 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     //
     // Setup the pipeline kernel
     //
-    int rows = frame_ycbcr->height;
-    int cols = frame_ycbcr->width;
+    int rows = frame_rgb->height;
+    int cols = frame_rgb->width;
     setupPipelineKernel(program, rows, cols);
 
     /*
@@ -813,20 +813,19 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       lowPass_cl();
       */
       Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
+      //Image* frame_ycbcr = new Image(width, height, FULLSIZE);
 
       ErrorCheck( clEnqueueReadBuffer(com_qs[0], mem_Y, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Y->data, 0, NULL, NULL) );
       ErrorCheck( clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cb->data, 0, NULL, NULL) );
       ErrorCheck( clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cr->data, 0, NULL, NULL) );
   
-      Image* frame_ycbcr = new Image(width, height, FULLSIZE);
 
-      frame_lowpassed->Y->copy(frame_ycbcr->rc);
-      frame_lowpassed->Cb->copy(frame_blur_cb);
-      frame_lowpassed->Cr->copy(frame_blur_cr);
-      runtime[1] = tock(&clock);
-
-      dump_frame(frame_lowpassed, "frame_ycbcr_lowpass", frame_number);
-      delete frame_ycbcr;
+      //frame_lowpassed->Y->copy(frame_ycbcr->rc);
+      //frame_lowpassed->Cb->copy(frame_blur_cb);
+      //frame_lowpassed->Cr->copy(frame_blur_cr);
+      //runtime[1] = tock(&clock);
+      //dump_frame(frame_lowpassed, "frame_ycbcr_lowpass", frame_number);
+      //delete frame_ycbcr;
       // delete frame_blur_cb;
       // delete frame_blur_cr;
 
