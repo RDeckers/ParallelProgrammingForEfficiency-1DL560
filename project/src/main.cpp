@@ -520,6 +520,15 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     }
     return true;
   }
+  void write2CLbuffers(Image* in)
+  {
+    //
+    // Write image to openCL buffers
+    //
+    ErrorCheck( clEnqueueWriteBuffer(com_qs[0], mem_R, CL_FALSE, 0, in->rc->size_in_bytes(), in->rc->data, 0, NULL, NULL) );
+    ErrorCheck( clEnqueueWriteBuffer(com_qs[0], mem_G, CL_FALSE, 0, in->gc->size_in_bytes(), in->gc->data, 0, NULL, NULL) );
+    ErrorCheck( clEnqueueWriteBuffer(com_qs[0], mem_B, CL_FALSE, 0, in->bc->size_in_bytes(), in->bc->data, 0, NULL, NULL) );
+  }
 
   void setupPipelineKernel(cl_program program,  int image_rows, int image_cols)
   {
@@ -537,19 +546,19 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     // Inputs: 
     //
     ErrorCheck(clSetKernelArg(pipeline_kernel, 0, sizeof(cl_mem), (void *)&mem_R) );
-    ErrorCheck(clSetKernelArg(pipeline_kernel, 0, sizeof(cl_mem), (void *)&mem_G) );
-    ErrorCheck(clSetKernelArg(pipeline_kernel, 0, sizeof(cl_mem), (void *)&mem_B) );
+    ErrorCheck(clSetKernelArg(pipeline_kernel, 1, sizeof(cl_mem), (void *)&mem_G) );
+    ErrorCheck(clSetKernelArg(pipeline_kernel, 2, sizeof(cl_mem), (void *)&mem_B) );
     //
     // Outputs
     //
-    ErrorCheck(clSetKernelArg(pipeline_kernel, 0, sizeof(cl_mem), (void *)&mem_Y) );
-    ErrorCheck(clSetKernelArg(pipeline_kernel, 0, sizeof(cl_mem), (void *)&mem_Cb) );
-    ErrorCheck(clSetKernelArg(pipeline_kernel, 0, sizeof(cl_mem), (void *)&mem_Cr) );
+    ErrorCheck(clSetKernelArg(pipeline_kernel, 3, sizeof(cl_mem), (void *)&mem_Y) );
+    ErrorCheck(clSetKernelArg(pipeline_kernel, 4, sizeof(cl_mem), (void *)&mem_Cb) );
+    ErrorCheck(clSetKernelArg(pipeline_kernel, 5, sizeof(cl_mem), (void *)&mem_Cr) );
     //
     // Constants
     //
-    ErrorCheck(clSetKernelArg(pipeline_kernel, 0, sizeof(int), (void *)&image_rows) );
-    ErrorCheck(clSetKernelArg(pipeline_kernel, 0, sizeof(int), (void *)&image_cols) );
+    ErrorCheck(clSetKernelArg(pipeline_kernel, 6, sizeof(int), (void *)&image_rows) ); //image_rows == image-in->height
+    ErrorCheck(clSetKernelArg(pipeline_kernel, 7, sizeof(int), (void *)&image_cols) );  //image_clos == image-in->width
 
   }
   void RunPipelineKernel(int rows, int cols)
@@ -560,7 +569,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     work_dim[0] = cols;   // x-direction
     work_dim[1] = rows;
     //enque the kernel
-    ErrorCheck( clEnqueueNDRangeKernel(com_qs[0], kernel, 1, NULL, work_dim, work_item_dim, 0, NULL, NULL) );
+    ErrorCheck( clEnqueueNDRangeKernel(com_qs[0], pipeline_kernel, 1, NULL, work_dim, work_item_dim, 0, NULL, NULL) );
   }
 
   int encode() {
@@ -684,6 +693,14 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     free(log);
     }
 
+    //
+    // Setup the pipeline kernel
+    //
+    int rows = frame_ycbcr->height;
+    int cols = frame_ycbcr->width;
+    setupPipelineKernel(program, rows, cols);
+
+    /*
     kernel = clCreateKernel(program, "convertRGBtoYCbCr", &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
@@ -715,6 +732,8 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
     }
 
+    */
+
   // ret = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&mem_B);
   // if(CL_SUCCESS != ret){
   //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
@@ -724,6 +743,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
   //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
   // }
 
+    /*
     kernel_lowPass_X = clCreateKernel(program, "lowPass_X", &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
@@ -733,6 +753,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
     }
+    */
     /*/////////////////
     // END OPENCL INIT
     ///////////////*/
@@ -747,9 +768,21 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       frame_rgb = NULL;
       loadImage(frame_number, image_path, &frame_rgb);
 
+      //
+      // Write data to GPU memory buffers
+      //
+      write2CLbuffers( frame_rgb );
+      //
+      // Run kernel pipeline!
+      //
+      RunPipelineKernel(rows, cols);
+
+      // This is where convert and low-pass are done
+      // the filtered data now resided in Y Cb Cr buffers on the GPU
+
+      /*
       //  Convert to YCbCr
       report(INFO, "Covert to YCbCr...");
-      Image* frame_ycbcr = new Image(width, height, FULLSIZE);
       work_dim[0] = npixels;
       work_item_dim[0] = 512;
       tick(&clock);
@@ -776,28 +809,20 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       //
       // FIXME: Dont include unnecessary memory allocation in loop 
       //        this allocation can be done only once?
-      Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
 
       lowPass_cl();
+      */
+      Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
 
-      //Y frame doesn;t get touched.
+      ErrorCheck( clEnqueueReadBuffer(com_qs[0], mem_Y, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Y->data, 0, NULL, NULL) );
+      ErrorCheck( clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cb->data, 0, NULL, NULL) );
+      ErrorCheck( clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cr->data, 0, NULL, NULL) );
+  
+      Image* frame_ycbcr = new Image(width, height, FULLSIZE);
 
-
-      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Y, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Y->data, 0, NULL, NULL))){
-	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
-	return -1;
-      }
-      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cb->data, 0, NULL, NULL))){
-	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
-	return -1;
-      }
-      if(CL_SUCCESS != (ret = clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_TRUE, 0, npixels*sizeof(float), frame_lowpassed->Cr->data, 0, NULL, NULL))){
-	report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
-	return -1;
-      }
-      //frame_lowpassed->Y->copy(frame_ycbcr->rc);
-      //frame_lowpassed->Cb->copy(frame_blur_cb);
-      //frame_lowpassed->Cr->copy(frame_blur_cr);
+      frame_lowpassed->Y->copy(frame_ycbcr->rc);
+      frame_lowpassed->Cb->copy(frame_blur_cb);
+      frame_lowpassed->Cr->copy(frame_blur_cr);
       runtime[1] = tock(&clock);
 
       dump_frame(frame_lowpassed, "frame_ycbcr_lowpass", frame_number);

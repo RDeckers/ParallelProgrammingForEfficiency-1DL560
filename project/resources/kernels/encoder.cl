@@ -25,11 +25,11 @@ void d_RGB2YCbCr( float R,
   RGB2YCbCr_LowPassFilter
   Fused RGB conversion and low pass filter kernel
 
-    ->Reads in 32x16 RGB + neighboor values, 
+    ->Reads in 64x8 RGB + neighboor values, 
     ->computes conversion, places in local memory
-    -> Computes low pass result for 32x16 values, data
+    -> Computes low pass result for 64x8 values, data
       is shared via local memory
-    -> Writes out 32x16 low pass filtered values 
+    -> Writes out 64x8 low pass filtered values 
 
     Most of this code is unfortunately not divided into device side functions
     as that seems to freak OpenCL out at times.
@@ -103,9 +103,9 @@ __kernel void RGB2YCbCr_LowPassFilter_pipeline( __global float *g_R,
         //
         // Convert to YCbCr and place in local memory directly
         d_RGB2YCbCr( R,G,B, 
-                    Y ,
-                    Cb,
-                    Cr);
+                    &Y ,
+                    &Cb,
+                    &Cr);
 
         // All threads write to a unique position in LMEM (no syncing needed)
         lmem_Y [ l_ty + i*DIM_Y ][ l_tx + j*DIM_X] = Y ;
@@ -158,17 +158,17 @@ __kernel void RGB2YCbCr_LowPassFilter_pipeline( __global float *g_R,
   float cb_middle   = lmem_Cb[ (l_ty+offset)      ][ (l_tx+offset) ];
   float cb_bottom   = lmem_Cb[ (l_ty+offset) + 1  ][ (l_tx+offset) ];
   // Cr
-  float cr_top      = lmem_Cb[ (l_ty+offset) - 1  ][ (l_tx+offset) ];
-  float cr_middle   = lmem_Cb[ (l_ty+offset)      ][ (l_tx+offset) ];
-  float cr_bottom   = lmem_Cb[ (l_ty+offset) + 1  ][ (l_tx+offset) ];
+  float cr_top      = lmem_Cr[ (l_ty+offset) - 1  ][ (l_tx+offset) ];
+  float cr_middle   = lmem_Cr[ (l_ty+offset)      ][ (l_tx+offset) ];
+  float cr_bottom   = lmem_Cr[ (l_ty+offset) + 1  ][ (l_tx+offset) ];
 
   float low_pass_cr = 0.25f*cr_top + 0.5f*cr_middle + 0.25f*cr_bottom;
   float low_pass_cb = 0.25f*cb_top + 0.5f*cb_middle + 0.25f*cb_bottom;
   // Make sure all threads / WORK-items have read their values before update:
   barrier(CLK_LOCAL_MEM_FENCE);
   // Update LMEM ( central portion )
-  lmem_Cr[ (l_ty+offset) ][j] = low_pass_cr;
-  lmem_Cb[ (l_ty+offset) ][j] = low_pass_cb;
+  lmem_Cr[ (l_ty+offset) ][(l_tx+offset)] = low_pass_cr;
+  lmem_Cb[ (l_ty+offset) ][(l_tx+offset)] = low_pass_cb;
   // 
   // Synchronize for good measure
   //
