@@ -56,6 +56,7 @@ __kernel void lowPass_X(__global const float *in, __global float *out){
 
 //computes the sum of absolute differences between a 16x16 tile and the reference.
 float compute_block_delta(int x_loc, int y_loc, __local float* refference, __local float *NW, __local float *SW, __local float *NE, __local float *SE){
+  //TODO: compare with using one big __local buffer and reordering data when needed.
   __local float *tiles[4] = {NW, SW, NE, SE};//hacky way to select the write tile to read from without if's.
   float delta = 0;
   for(int y = 0; y < 16; y++){
@@ -72,6 +73,7 @@ float compute_block_delta(int x_loc, int y_loc, __local float* refference, __loc
 }
 
 //performs a search over a specific channel and returns a float4 corresponding to the results.
+//TODO: have each WG proccess a row instead of one tile. reduces global memory 'waste ratio'.
 float4 motionVectorSearch_subroutine(
   int i_glob, int stride_glob,
   int x_loc, int y_loc, int i_loc,
@@ -109,7 +111,7 @@ __kernel void motionVectorSearch(
     __global float *ref_Y, __global float *ref_Cr, __global float *ref_Cb, //channels of out reference frame
     __local float *ref_block, //The buffer block for our old reference array.
     __local float *tile_buffer_1, __local float *tile_buffer_2, __local float *tile_buffer_3, __local float *tile_buffer_4, __local float *tile_buffer_5, //buffers for our tiles
-    __global float4 *scores
+    __global int *indices
   ){
     //TODO: add edge-case conditions.
     //TODO: verify
@@ -129,12 +131,35 @@ __kernel void motionVectorSearch(
     score += 0.50f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Y, ref_Y, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4, tile_buffer_5);
     score += 0.25f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Cr, ref_Cr, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4, tile_buffer_5);
     score += 0.25f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Cb, ref_Cb, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4, tile_buffer_5);
-    //now find the minimum score of all the scores in the workgroup, and write it out.
-    int my_min_i = (min(score[0], score[1]) <= min(score[2], score[3])) ? (score[1] <= score[0]) : 2+(score[3] <= score[2]);
-    int my_min = min(min(score.x, score.y), min(score.z, score.w));
-    ref_block[i_loc] = my_min;//reuse the ref_block for storing our minimum values, then reduce in local memory to get actual minium
-    barrier(CLK_LOCAL_MEM_FENCE);
-    int loc_size  = stride_loc*get_local_size(1);
-    //TODO: reduction to find minimum element. store it's index in global memory
 
+    //find the minimum element of our vector and it's place.
+    int my_min_i = (min(score[0], score[1]) <= min(score[2], score[3])) ? (score[1] <= score[0]) : 2+(score[3] <= score[2]);
+    float my_min = min(min(score.x, score.y), min(score.z, score.w));
+
+    //reuse one of the buffers as an index buffer
+    __local int* index_buffer = tile_buffer_1;
+    int my_index = 4*i_loc+my_min_i;
+
+    ref_block[i_loc] = my_min;//reuse the ref_block for storing our minimum values, then reduce in local memory to get actual minium
+    index_buffer[i_loc] = my_index;//reuse the tile_buffer_1 as an interger storage for the index.
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    //TODO: test, vectorize, compare with readback, unroll loop.
+    //16x16 = 256 elements, we start at 128. so log2(128) iterations = 128->64->32->16->8->4->2->1 = 7 iterations. Less with vectorization.
+    for(uint participants = (stride_loc*get_local_size(1))/2; participants >= 1; participants /= 2){
+      if(i_loc < participants){
+        float my_new = ref_block[i_loc+participants];
+        int my_new_index = index_buffer[i_loc+participants];
+        int selection_mask = my_new < my_min;
+        my_min = select(my_new, my_min, selection_mask);
+        my_index = select(my_new_index, my_index, selection_mask);
+        ref_block[i_loc] = my_min;//reuse the ref_block for storing our minimum values, then reduce in local memory to get actual minium
+        index_buffer[i_loc] = my_index;//reuse the tile_buffer_1 as an interger storage for the index.
+      }
+      barrier(CLK_LOCAL_MEM_FENCE);//barrier outside if so everyone hits it.
+    }
+    //now the first work-item will have computed the minium.
+    if(i_loc == 0){
+      indices[get_group_id(0)+get_group_id(1)*get_num_groups(0)];
+    }
 }
