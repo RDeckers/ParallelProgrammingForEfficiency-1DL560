@@ -54,51 +54,25 @@ __kernel void lowPass_X(__global const float *in, __global float *out){
   out[i_glob] = a*left + b*middle + c*right;
 }
 
-// Motion vector search:
-//  Takes most time.
-//  Load the relevant area around the current block in local mem.
-//   *have each compute unit handle a starting pixel of a block (or several if needed).
-//   *OR have each pixel in a tile be handled by a compute unit (16x16 block = 256 units)
-//     bad idea.
-//   then, for each tile/or compute unit we have a score. We need the best match. So we need to either sort them in some way on the GPU
-//   or move back to cpu at this point.
-
-//512 compute units,
-//16x16 blocks.
-//search space is -16 to +16 relative, so 32*32 pixels = 1024 pixels
-//actually (16*3)^2 = 1024*9
-//load 2 pixels per wi.
-//optimize:
-  //vectorize. Compare offset with swivels.
-  //when done with our currentblock, don't clear local memory, but step right (keep blocks, left right center.)
-  //experiment with block-sizes.
-//12 bytes per pixel = ~128 KiB, local memory size = 64 Kib.
-//have to separate channels.
-//load
-//native vector format is 4 float, SIMD
-//difference computation is symmetric.
-
-//instead
-//load to be tested block into local memory. 16x16 = 256
-//load two top left blocks into local memory. Compute first block comparison.
-
+//computes the sum of absolute differences between a 16x16 tile and the reference.
 float compute_block_delta(int x_loc, int y_loc, __local float* refference, __local float *NW, __local float *SW, __local float *NE, __local float *SE){
-  float *tiles[4] = {NW, SW, NE, SE};
+  float *tiles[4] = {NW, SW, NE, SE};//hacky way to select the write tile to read from without if's.
   float delta = 0;
   for(int y = 0; y < 16; y++){
     int y_buf = y_loc+y;
-    int y_overflow = (y_buf >= 16);
+    int y_overflow = (y_buf >= 16);//return 1 or 0.
     for(int x = 0; x < 16; x++){
       int x_buf x_loc+x;
       int x_overflow = (x_buf >= 16);
-      float *current_tile = tiles[y_overflow+2*x_overflow];
+      float *current_tile = tiles[y_overflow+2*x_overflow];//gives an index in [0,1,2,3] corresponding to the overflow in x and y
       delta += fabs(current_tile[(x_buf&15)+16*(y_buf&16)]-refference[x+16*y]);
     }
   }
   return delta;
 }
 
-__kernel void motionVectorSearch_subroutine(
+//performs a search over a specific channel and returns a float4 corresponding to the results.
+float4 motionVectorSearch_subroutine(
   int i_glob, int stride_glob,
   int x_loc, int y_loc, int i_loc,
   __global float *channel, __global float *ref_channel,
@@ -113,7 +87,7 @@ __kernel void motionVectorSearch_subroutine(
     tile_buffer_2[i_loc] = channel[i_glob+16*stride_glob];//SW
     tile_buffer_3[i_loc] = channel[i_glob+16];//NE
     tile_buffer_4[i_loc] = channel[i_glob+16+16*stride_glob];//SE
-    //make sure we're consistent
+    //make sure all writes to local memory have finished
     barrier(CLK_LOCAL_MEM_FENCE);
     score.0= compute_block_delta(x_loc, channel_loc, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4);
     tile_buffer_5[i_loc] = channel[i_glob+32];
@@ -150,16 +124,17 @@ __kernel void motionVectorSearch(
     int y_loc = get_local_id(1);
     int stride_loc = get_local_size(0);
     int i_loc = x_loc+y_loc*stride_loc;
-    int loc_size  = stride_loc*get_local_size(1);
-    float4 score = {0,0,0,0};
+
+    float4 score = {0,0,0,0};//score here tracks which offset gives the best motion vector, lower is better.
     score += 0.50f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Y, ref_Y, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4, tile_buffer_5);
     score += 0.25f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Cr, ref_Cr, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4, tile_buffer_5);
     score += 0.25f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Cb, ref_Cb, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4, tile_buffer_5);
     //now find the minimum score of all the scores in the workgroup, and write it out.
     my_min_i = (min(score.0, score.1) <= min(score.2, score.3)) ? (score.1 <= score.1) : 2+(score.3 <= score.3);
     my_min = score[my_min_i];
-    ref_block[i_loc] = my_min;
+    ref_block[i_loc] = my_min;//reuse the ref_block for storing our minimum values, then reduce in local memory to get actual minium
     barrier(CLK_LOCAL_MEM_FENCE);
-    //TODO: reduction to find minimum element.
+    int loc_size  = stride_loc*get_local_size(1);
+    //TODO: reduction to find minimum element. store it's index in global memory
 
 }
