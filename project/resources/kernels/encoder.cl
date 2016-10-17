@@ -21,6 +21,26 @@ void d_RGB2YCbCr( float R,
     Cb[0] = 128.0f - (0.168736f*R) - (0.331264f*G) +      (0.5f*B);
     Cr[0] = 128.0f +      (0.5f*R) - (0.418688f*G) - (0.081312f*B);
 }
+
+void d_conv( float tl,
+	     float tm,
+	     float tr,
+	     float ll,
+	     float mm,
+	     float rr,
+	     float bl,
+	     float bm,
+	     float br, 
+	     float* res)
+{
+  float corner =  1.0f/16.0f ;
+  float neighb =  1.0f/8.0f ;
+  float self =  1.0f/4.0f ; 
+  res[0] = corner * tl + neighb * tm +  corner * tr
+    + neighb * ll +  self * mm + neighb * rr
+    + corner * bl + neighb * bm +  corner * br;
+}
+
 /*
   RGB2YCbCr_LowPassFilter
   Fused RGB conversion and low pass filter kernel
@@ -123,49 +143,78 @@ __kernel void RGB2YCbCr_LowPassFilter_pipeline( __global float *g_R,
   //
   // Offset to area of intereens in LMEM (center part)
   const int offset = 1;
-  // Iterate Y to compute the 2 halo rows at the top and bottom
-  for(int i = l_ty; i < LMEM_Y; i+=DIM_Y)
-  {
-    // Cb
-    float cb_left   = lmem_Cb[ i ][ (l_tx+offset) - 1];
-    float cb_middle = lmem_Cb[ i ][ (l_tx+offset) ];
-    float cb_right  = lmem_Cb[ i ][ (l_tx+offset) + 1];
-    // Cr
-    float cr_left   = lmem_Cr[ i ][ (l_tx+offset) - 1];
-    float cr_middle = lmem_Cr[ i ][ (l_tx+offset) ];
-    float cr_right  = lmem_Cr[ i ][ (l_tx+offset) + 1];
-
-    float low_pass_cr = 0.25f*cr_left + 0.5f*cr_middle + 0.25f*cr_right;
-    float low_pass_cb = 0.25f*cb_left + 0.5f*cb_middle + 0.25f*cb_right;
-    // Make sure all threads / WORK-items have read their values before update:
-    barrier(CLK_LOCAL_MEM_FENCE);
-    // Update LMEM ( central portion )
-    lmem_Cr[ i ][ (l_tx+offset) ] = low_pass_cr;
-    lmem_Cb[ i ][ (l_tx+offset) ] = low_pass_cb;
-    // Synchronize for nex iter
-    // FIXME: probably not need as we are switching rows (and they are data-independent here)
-    // barrier(CLK_LOCAL_MEM_FENCE);
-  }
-  barrier(CLK_LOCAL_MEM_FENCE);
-  //
-  // Low pass filter Y-direction
-  //
-  // NOTE: we no longer need to care about halo left/right sides as no other 
-  // steps require them
-  //
   // Cb
-  float cb_top      = lmem_Cb[ (l_ty+offset) - 1  ][ (l_tx+offset) ];
-  float cb_middle   = lmem_Cb[ (l_ty+offset)      ][ (l_tx+offset) ];
-  float cb_bottom   = lmem_Cb[ (l_ty+offset) + 1  ][ (l_tx+offset) ];
-  // Cr
-  float cr_top      = lmem_Cr[ (l_ty+offset) - 1  ][ (l_tx+offset) ];
-  float cr_middle   = lmem_Cr[ (l_ty+offset)      ][ (l_tx+offset) ];
-  float cr_bottom   = lmem_Cr[ (l_ty+offset) + 1  ][ (l_tx+offset) ];
+  float cb_tl = lmem_Cb[ (l_ty+offset) - 1 ][ (l_tx+offset) - 1];
+  float cb_tm = lmem_Cb[ (l_ty+offset) - 1 ][ (l_tx+offset) ];
+  float cb_tr = lmem_Cb[ (l_ty+offset) - 1 ][ (l_tx+offset) + 1];
+  float cb_ll = lmem_Cb[ l_ty+offset ][ (l_tx+offset) - 1];
+  float cb_mm = lmem_Cb[ l_ty+offset ][ (l_tx+offset) ];
+  float cb_rr = lmem_Cb[ l_ty+offset ][ (l_tx+offset) + 1];
+  float cb_bl = lmem_Cb[ (l_ty+offset) + 1 ][ (l_tx+offset) - 1];
+  float cb_bm = lmem_Cb[ (l_ty+offset) + 1 ][ (l_tx+offset) ];
+  float cb_br = lmem_Cb[ (l_ty+offset) + 1 ][ (l_tx+offset) + 1];
 
-  float low_pass_cr = 0.25f*cr_top + 0.5f*cr_middle + 0.25f*cr_bottom;
-  float low_pass_cb = 0.25f*cb_top + 0.5f*cb_middle + 0.25f*cb_bottom;
-  // Make sure all threads / WORK-items have read their values before update:
+  float low_pass_cb = 0.0f;
+  d_conv(cb_tl, cb_tm, cb_tr, cb_ll, cb_mm, cb_rr, cb_bl, cb_bm, cb_br, &low_pass_cb);
+
+  // Cr
+  float cr_tl = lmem_Cr[ (l_ty+offset) - 1 ][ (l_tx+offset) - 1];
+  float cr_tm = lmem_Cr[ (l_ty+offset) - 1 ][ (l_tx+offset) ];
+  float cr_tr = lmem_Cr[ (l_ty+offset) - 1 ][ (l_tx+offset) + 1];
+  float cr_ll = lmem_Cr[ l_ty+offset ][ (l_tx+offset) - 1];
+  float cr_mm = lmem_Cr[ l_ty+offset ][ (l_tx+offset) ];
+  float cr_rr = lmem_Cr[ l_ty+offset ][ (l_tx+offset) + 1];
+  float cr_bl = lmem_Cr[ (l_ty+offset) + 1 ][ (l_tx+offset) - 1];
+  float cr_bm = lmem_Cr[ (l_ty+offset) + 1 ][ (l_tx+offset) ];
+  float cr_br = lmem_Cr[ (l_ty+offset) + 1 ][ (l_tx+offset) + 1];
+
+  float low_pass_cr = 0.0f;
+  d_conv(cr_tl, cr_tm, cr_tr, cr_ll, cr_mm, cr_rr, cr_bl, cr_bm, cr_br, &low_pass_cr);
+
   barrier(CLK_LOCAL_MEM_FENCE);
+  // // Iterate Y to compute the 2 halo rows at the top and bottom
+  // for(int i = l_ty; i < LMEM_Y; i+=DIM_Y)
+  // {
+  //   // Cb
+  //   float cb_left   = lmem_Cb[ i ][ (l_tx+offset) - 1];
+  //   float cb_middle = lmem_Cb[ i ][ (l_tx+offset) ];
+  //   float cb_right  = lmem_Cb[ i ][ (l_tx+offset) + 1];
+  //   // Cr
+  //   float cr_left   = lmem_Cr[ i ][ (l_tx+offset) - 1];
+  //   float cr_middle = lmem_Cr[ i ][ (l_tx+offset) ];
+  //   float cr_right  = lmem_Cr[ i ][ (l_tx+offset) + 1];
+
+  //   float low_pass_cr = 0.25f*cr_left + 0.5f*cr_middle + 0.25f*cr_right;
+  //   float low_pass_cb = 0.25f*cb_left + 0.5f*cb_middle + 0.25f*cb_right;
+  //   // Make sure all threads / WORK-items have read their values before update:
+  //   barrier(CLK_LOCAL_MEM_FENCE);
+  //   // Update LMEM ( central portion )
+  //   lmem_Cr[ i ][ (l_tx+offset) ] = low_pass_cr;
+  //   lmem_Cb[ i ][ (l_tx+offset) ] = low_pass_cb;
+  //   // Synchronize for nex iter
+  //   // FIXME: probably not need as we are switching rows (and they are data-independent here)
+  //   // barrier(CLK_LOCAL_MEM_FENCE);
+  // }
+  // barrier(CLK_LOCAL_MEM_FENCE);
+  // //
+  // // Low pass filter Y-direction
+  // //
+  // // NOTE: we no longer need to care about halo left/right sides as no other 
+  // // steps require them
+  // //
+  // // Cb
+  // float cb_top      = lmem_Cb[ (l_ty+offset) - 1  ][ (l_tx+offset) ];
+  // float cb_middle   = lmem_Cb[ (l_ty+offset)      ][ (l_tx+offset) ];
+  // float cb_bottom   = lmem_Cb[ (l_ty+offset) + 1  ][ (l_tx+offset) ];
+  // // Cr
+  // float cr_top      = lmem_Cr[ (l_ty+offset) - 1  ][ (l_tx+offset) ];
+  // float cr_middle   = lmem_Cr[ (l_ty+offset)      ][ (l_tx+offset) ];
+  // float cr_bottom   = lmem_Cr[ (l_ty+offset) + 1  ][ (l_tx+offset) ];
+
+  // float low_pass_cr = 0.25f*cr_top + 0.5f*cr_middle + 0.25f*cr_bottom;
+  // float low_pass_cb = 0.25f*cb_top + 0.5f*cb_middle + 0.25f*cb_bottom;
+  // // Make sure all threads / WORK-items have read their values before update:
+  // barrier(CLK_LOCAL_MEM_FENCE);
   // Update LMEM ( central portion )
   lmem_Cr[ (l_ty+offset) ][(l_tx+offset)] = low_pass_cr;
   lmem_Cb[ (l_ty+offset) ][(l_tx+offset)] = low_pass_cb;
