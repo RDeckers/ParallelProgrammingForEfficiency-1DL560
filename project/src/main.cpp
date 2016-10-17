@@ -571,7 +571,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     report(INFO, "trying to run kernel with [%u, %u] and [%u, %u]", DIM_X, DIM_Y, cols, rows);
     //enque the kernel
     cl_int ret;
-    if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], pipeline_kernel, 1, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
+    if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], pipeline_kernel, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
       report(FAIL, "clEnqueueNDRangeKernel(pipeline) returned: %s (%d)", cluErrorString(ret), ret);
       exit(-1);
     }
