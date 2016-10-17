@@ -41,6 +41,7 @@ cl_command_queue *com_qs = NULL;
 cl_kernel kernel;
 cl_kernel kernel_lowPass_X;
 cl_kernel kernel_lowPass_Y;
+cl_kernel kernel_mvs;
 size_t work_dim[2];
 size_t work_item_dim[2];
 
@@ -52,7 +53,12 @@ cl_mem mem_Y;
 cl_mem mem_Cr;
 cl_mem mem_Cb;
 
+cl_mem mem_Y_ref;
+cl_mem mem_Cr_ref;
+cl_mem mem_Cb_ref;
+
 cl_mem mem_lowPass;
+cl_mem mem_indices;
 
 
 //can be optimized by saving bytes instead of floats and converting dynamically.
@@ -198,6 +204,50 @@ void lowPass_cl(){
   clFinish(com_qs[0]);
 }
 
+std::vector<mVector>* motionVectorSearch_cl(Frame* in, int32_t *indices){
+  std::vector<mVector> *motion_vectors = new std::vector<mVector>(); // empty list of ints
+  //Write the reference frame to the buffers
+  //TODO: optimize so we just change arguments.
+  cl_int ret = clEnqueueWriteBuffer(com_qs[0], mem_Y_ref, CL_FALSE, 0, in->Y->size_in_bytes(), in->Y->data, 0, NULL, NULL);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  ret = clEnqueueWriteBuffer(com_qs[0], mem_Cb_ref, CL_FALSE, 0, in->Cb->size_in_bytes(), in->Cb->data, 0, NULL, NULL);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  ret = clEnqueueWriteBuffer(com_qs[0], mem_Cr_ref, CL_FALSE, 0, in->Cr->size_in_bytes(), in->Cr->data, 0, NULL, NULL);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  clFinish(com_qs[0]);
+
+  //run the kernel
+  work_item_dim[0] = work_item_dim[1] = 16;
+  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_mvs, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
+        report(FAIL, "enqueue kernel (mvs) returned: %s (%d)",cluErrorString(ret), ret);
+        return nullptr;
+  }
+  clFinish(com_qs[0]);
+
+  int num_groups = work_dim[0]*work_dim[1]/(work_item_dim[0]*work_item_dim[1]);
+  //read back the data
+  ret = clEnqueueReadBuffer(com_qs[0], mem_indices, CL_FALSE, 0, num_groups, indices, 0, NULL, NULL);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  clFinish(com_qs[0]);
+
+  //report(INFO,"there are %d groups", num_groups);
+  for(int i = 0; i < num_groups; i++){
+    mVector v;
+    v.a=0;
+    v.b=0;
+    motion_vectors->push_back(v);
+  }
+  return motion_vectors;
+}
+
 
 Channel* lowPass(Channel* in, Channel* out){
   // Applies a simple 3-tap low-pass filter in the X- and Y- dimensions.
@@ -316,6 +366,7 @@ Frame* computeDelta(Frame* i_frame_ycbcr, Frame* p_frame_ycbcr, std::vector<mVec
           int src_y = my+vector[1]+y;
           int dst_x = mx+x;
           int dst_y = my+y;
+          //report(INFO, "computing delta for %d, %d -> %d, %d",src_x, src_y, dst_x, dst_y);
           delta->Y->get_ref(dst_y, dst_x) -= i_frame_ycbcr->Y->get(src_y, src_x);
           delta->Cb->get_ref(dst_y, dst_x) -= i_frame_ycbcr->Cb->get(src_y, src_x);
           delta->Cr->get_ref(dst_y, dst_x) -= i_frame_ycbcr->Cr->get(src_y, src_x);
@@ -545,7 +596,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     //int npixels_lowPass = (width-2)*(height-2);
 
     delete frame_rgb;
-
+    int32_t *indices = (int32_t*) malloc(4*npixels/(16*16));
     int end_frame = int(N_FRAMES);
     int i_frame_frequency = int(I_FRAME_FREQ);
     //struct timeval starttime, endtime;
@@ -598,23 +649,42 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       report(FAIL, "clCreateBuffer (B) returned: %s (%d)", cluErrorString(ret), ret);
     }
 
-    mem_Y = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels*sizeof(float), nullptr, &ret);
+    mem_Y = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Y) returned: %s (%d)", cluErrorString(ret), ret);
     }
-    mem_Cb = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels*sizeof(float), nullptr, &ret);
+    mem_Cb = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Cb) returned: %s (%d)", cluErrorString(ret), ret);
     }
-    mem_Cr = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels*sizeof(float), nullptr, &ret);
+    mem_Cr = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
     }
+
+    mem_Y_ref = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateBuffer (Y_ref) returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    mem_Cb_ref = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateBuffer (Cb_ref) returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    mem_Cr_ref = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateBuffer (Cr_ref) returned: %s (%d)", cluErrorString(ret), ret);
+    }
+
 
     //buffer for lowPass
     mem_lowPass = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels_lowPass*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (lowPass) returned: %s (%d)", cluErrorString(ret), ret);
+    }
+
+    mem_indices = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels*sizeof(float), nullptr, &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateBuffer (indices) returned: %s (%d)", cluErrorString(ret), ret);
     }
     /*
       mem_X_OUT = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels_lowPass*sizeof(float), nullptr, &ret);
@@ -643,7 +713,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     }
     free(log);
     }
-
+    report(PASS, "program build");
     kernel = clCreateKernel(program, "convertRGBtoYCbCr", &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
@@ -693,6 +763,45 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
     }
+    report(WARN, "TRYING TO CREATE KERNEL");
+    kernel_mvs = clCreateKernel(program, "motionVectorSearch", &ret);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    report(PASS, "kernel created");
+    ret = clSetKernelArg(kernel_mvs, 0, sizeof(cl_mem), (void *)&mem_Y);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    ret = clSetKernelArg(kernel_mvs, 1, sizeof(cl_mem), (void *)&mem_Cb);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    ret = clSetKernelArg(kernel_mvs, 2, sizeof(cl_mem), (void *)&mem_Cr);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+
+    ret = clSetKernelArg(kernel_mvs, 3, sizeof(cl_mem), (void *)&mem_Y_ref);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    ret = clSetKernelArg(kernel_mvs, 4, sizeof(cl_mem), (void *)&mem_Cb_ref);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    ret = clSetKernelArg(kernel_mvs, 5, sizeof(cl_mem), (void *)&mem_Cr_ref);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+
+    ret = clSetKernelArg(kernel_mvs, 6, sizeof(cl_mem), (void *)&mem_indices);
+    if(CL_SUCCESS != ret){
+      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    }
+    report(PASS, "kernel setup");
+
+
     /*/////////////////
     // END OPENCL INIT
     ///////////////*/
@@ -753,7 +862,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
         report(INFO, "Motion Vector Search...");
 
         tick(&clock);
-        motion_vectors = motionVectorSearch(previous_frame_lowpassed, frame_lowpassed, frame_lowpassed->width, frame_lowpassed->height);
+        motion_vectors = motionVectorSearch_cl(previous_frame_lowpassed, indices);
         mvs_t[frame_number] = elapsed_since(&clock);
 
         report(INFO, "Compute Delta...");
