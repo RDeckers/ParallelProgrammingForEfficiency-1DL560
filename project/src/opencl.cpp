@@ -49,13 +49,14 @@ cl_mem mem_R;
 cl_mem mem_G;
 cl_mem mem_B;
 
-cl_mem mem_Y;
-cl_mem mem_Cr;
-cl_mem mem_Cb;
+int frame_number;
+cl_mem mem_Y[2];
+cl_mem mem_Cr[2];
+cl_mem mem_Cb[2];
 
-cl_mem mem_Y_ref;
-cl_mem mem_Cr_ref;
-cl_mem mem_Cb_ref;
+// cl_mem mem_Y_ref;
+// cl_mem mem_Cr_ref;
+// cl_mem mem_Cb_ref;
 
 cl_mem mem_lowPass;
 
@@ -129,15 +130,15 @@ void uploadData_cl(Image* in){
 
 void readbackData_cl(Frame *out){
   //enque reading the output
-  cl_int ret = clEnqueueReadBuffer(com_qs[0], mem_Y, CL_FALSE, 0, out->Y->size_in_bytes(), out->Y->data, 0, NULL, NULL);
+  cl_int ret = clEnqueueReadBuffer(com_qs[0], mem_Y[frame_number&1], CL_FALSE, 0, out->Y->size_in_bytes(), out->Y->data, 0, NULL, NULL);
   if(CL_SUCCESS != ret){
     report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
   }
-  ret = clEnqueueReadBuffer(com_qs[0], mem_Cb, CL_FALSE, 0, out->Cb->size_in_bytes(), out->Cb->data, 0, NULL, NULL);
+  ret = clEnqueueReadBuffer(com_qs[0], mem_Cb[frame_number&1], CL_FALSE, 0, out->Cb->size_in_bytes(), out->Cb->data, 0, NULL, NULL);
   if(CL_SUCCESS != ret){
     report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
   }
-  ret = clEnqueueReadBuffer(com_qs[0], mem_Cr, CL_FALSE, 0, out->Cr->size_in_bytes(), out->Cr->data, 0, NULL, NULL);
+  ret = clEnqueueReadBuffer(com_qs[0], mem_Cr[frame_number&1], CL_FALSE, 0, out->Cr->size_in_bytes(), out->Cr->data, 0, NULL, NULL);
   if(CL_SUCCESS != ret){
     report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
   }
@@ -147,6 +148,18 @@ void readbackData_cl(Frame *out){
 void convertRGBtoYCbCr_cl(
 ){
   cl_int ret;
+  ret = clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)&mem_Y[frame_number&1]);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  ret = clSetKernelArg(kernel, 4, sizeof(cl_mem), (void *)&mem_Cb[frame_number&1]);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  ret = clSetKernelArg(kernel, 5, sizeof(cl_mem), (void *)&mem_Cr[frame_number&1]);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+  }
   if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel, 1, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
         report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
         return;
@@ -163,7 +176,7 @@ void lowPass_cl(){
 
   ///for Cb
   //in X
-  clSetKernelArg(kernel_lowPass_X, 0, sizeof(cl_mem), (void *)&mem_Cb);
+  clSetKernelArg(kernel_lowPass_X, 0, sizeof(cl_mem), (void *)&mem_Cb[frame_number&1]);
   clSetKernelArg(kernel_lowPass_X, 1, sizeof(cl_mem), (void *)&mem_lowPass);
   //enque the kernel
   if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_X, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
@@ -174,7 +187,7 @@ void lowPass_cl(){
 
   //in Y
   clSetKernelArg(kernel_lowPass_Y, 0, sizeof(cl_mem), (void *)&mem_lowPass);
-  clSetKernelArg(kernel_lowPass_Y, 1, sizeof(cl_mem), (void *)&mem_Cb);
+  clSetKernelArg(kernel_lowPass_Y, 1, sizeof(cl_mem), (void *)&mem_Cb[frame_number&1]);
   if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_Y, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
         report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
         return;
@@ -184,7 +197,7 @@ void lowPass_cl(){
 
   ///for Cr
   //in X
-  clSetKernelArg(kernel_lowPass_X, 0, sizeof(cl_mem), (void *)&mem_Cr);
+  clSetKernelArg(kernel_lowPass_X, 0, sizeof(cl_mem), (void *)&mem_Cr[frame_number&1]);
   clSetKernelArg(kernel_lowPass_X, 1, sizeof(cl_mem), (void *)&mem_lowPass);
   //enque the kernel
   if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_X, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
@@ -195,7 +208,7 @@ void lowPass_cl(){
 
   //in Y
   clSetKernelArg(kernel_lowPass_Y, 0, sizeof(cl_mem), (void *)&mem_lowPass);
-  clSetKernelArg(kernel_lowPass_Y, 1, sizeof(cl_mem), (void *)&mem_Cr);
+  clSetKernelArg(kernel_lowPass_Y, 1, sizeof(cl_mem), (void *)&mem_Cr[frame_number&1]);
 
   if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_lowPass_Y, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
     report(FAIL, "enqueue kernel[0] returned: %s (%d)",cluErrorString(ret), ret);
@@ -208,21 +221,48 @@ std::vector<mVector>* motionVectorSearch_cl(Frame* in, int32_t *indices){
   std::vector<mVector> *motion_vectors = new std::vector<mVector>(); // empty list of ints
   //Write the reference frame to the buffers
   //TODO: optimize so we just change arguments.
-  cl_int ret = clEnqueueWriteBuffer(com_qs[0], mem_Y_ref, CL_FALSE, 0, in->Y->size_in_bytes(), in->Y->data, 0, NULL, NULL);
+  // cl_int ret = clEnqueueWriteBuffer(com_qs[0], mem_Y_ref, CL_FALSE, 0, in->Y->size_in_bytes(), in->Y->data, 0, NULL, NULL);
+  // if(CL_SUCCESS != ret){
+  //   report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
+  // }
+  // ret = clEnqueueWriteBuffer(com_qs[0], mem_Cb_ref, CL_FALSE, 0, in->Cb->size_in_bytes(), in->Cb->data, 0, NULL, NULL);
+  // if(CL_SUCCESS != ret){
+  //   report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
+  // }
+  // ret = clEnqueueWriteBuffer(com_qs[0], mem_Cr_ref, CL_FALSE, 0, in->Cr->size_in_bytes(), in->Cr->data, 0, NULL, NULL);
+  // if(CL_SUCCESS != ret){
+  //   report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
+  // }
+  // clFinish(com_qs[0]);
+  int index_cur = frame_number&1;
+  int index_prev = index_cur^1;
+  cl_int ret = clSetKernelArg(kernel_mvs, 0, sizeof(cl_mem), (void *)&mem_Y[index_cur]);
   if(CL_SUCCESS != ret){
-    report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
+    report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
   }
-  ret = clEnqueueWriteBuffer(com_qs[0], mem_Cb_ref, CL_FALSE, 0, in->Cb->size_in_bytes(), in->Cb->data, 0, NULL, NULL);
+  ret = clSetKernelArg(kernel_mvs, 1, sizeof(cl_mem), (void *)&mem_Cb[index_cur]);
   if(CL_SUCCESS != ret){
-    report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
+    report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
   }
-  ret = clEnqueueWriteBuffer(com_qs[0], mem_Cr_ref, CL_FALSE, 0, in->Cr->size_in_bytes(), in->Cr->data, 0, NULL, NULL);
+  ret = clSetKernelArg(kernel_mvs, 2, sizeof(cl_mem), (void *)&mem_Cr[index_cur]);
   if(CL_SUCCESS != ret){
-    report(FAIL, "clEnqueueWriteBuffer returned: %s (%d)", cluErrorString(ret), ret);
+    report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
   }
-  clFinish(com_qs[0]);
 
+  ret = clSetKernelArg(kernel_mvs, 3, sizeof(cl_mem), (void *)&mem_Y[index_prev]);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  ret = clSetKernelArg(kernel_mvs, 4, sizeof(cl_mem), (void *)&mem_Cb[index_prev]);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+  }
+  ret = clSetKernelArg(kernel_mvs, 5, sizeof(cl_mem), (void *)&mem_Cr[index_prev]);
+  if(CL_SUCCESS != ret){
+    report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+  }
   //run the kernel
+
 
   work_item_dim[0] = work_item_dim[1] = 16;
   //report(INFO, "running over [%u, %u] in [%u, %u] groups", work_dim[0], work_dim[1], work_item_dim[0], work_item_dim[1]);
@@ -289,70 +329,6 @@ Channel* lowPass(Channel* in, Channel* out){
 
   return out;
 }
-
-
-std::vector<mVector>* motionVectorSearch(Frame* source, Frame* match, int width, int height) {
-  std::vector<mVector> *motion_vectors = new std::vector<mVector>(); // empty list of ints
-
-  float Y_weight = 0.5;
-  float Cr_weight = 0.25;
-  float Cb_weight = 0.25;
-
-  //Window size is how much on each side of the block we search
-  int window_size = 16;
-  int block_size = 16;
-
-  //How far from the edge we can go since we don't special case the edges
-  int inset = (int) max((float)window_size, (float)block_size);
-  int iter=0;
-  //Loop over all the blocks in the image.
-  for (int my=inset; my<height-(inset+window_size)+1; my+=block_size) {
-    for (int mx=inset; mx<width-(inset+window_size)+1; mx+=block_size) {
-
-      float best_match_sad = 1e10;
-      int best_match_location[2] = {0, 0};
-      //Tile block_size by block_size blocks, in a window_size by window_size area around the current block
-      for(int sy=my-window_size; sy<my+window_size; sy++) {
-        for(int sx=mx-window_size; sx<mx+window_size; sx++) {
-          float current_match_sad = 0;
-          // Do the SAD
-          //compute current delta.
-          for (int y=0; y<block_size; y++) {
-            for (int x=0; x<block_size; x++) {
-              int match_x = mx+x;
-              int match_y = my+y;
-              int search_x = sx+x;
-              int search_y = sy+y;
-              float diff_Y  = fabs(match->Y->get(match_y, match_x) - source->Y->get(search_y, search_x));
-              float diff_Cb = fabs(match->Cb->get(match_y, match_x) - source->Cb->get(search_y, search_x));
-              float diff_Cr = fabs(match->Cr->get(match_y, match_x) - source->Cr->get(search_y, search_x));
-
-              float diff_total = Y_weight*diff_Y + Cb_weight*diff_Cb + Cr_weight*diff_Cr;
-              current_match_sad = current_match_sad + diff_total;
-            }
-          } //end SAD
-          //if this tile has the best match, remember it.
-          if (current_match_sad <= best_match_sad){
-            best_match_sad = current_match_sad;
-            best_match_location[0] = sx-mx;
-            best_match_location[1] = sy-my;
-          }
-        }
-      }
-
-      //store the best.
-      report(PASS, "%d, %f", motion_vectors->size(), best_match_sad);
-      mVector v;
-      v.a=best_match_location[0];
-      v.b=best_match_location[1];
-      motion_vectors->push_back(v);
-
-    }
-  }
-
-  return motion_vectors;
-}
-
 
 Frame* computeDelta(Frame* i_frame_ycbcr, Frame* p_frame_ycbcr, std::vector<mVector>* motion_vectors){
   Frame *delta = new Frame(p_frame_ycbcr);
@@ -662,28 +638,28 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       report(FAIL, "clCreateBuffer (B) returned: %s (%d)", cluErrorString(ret), ret);
     }
 
-    mem_Y = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
+    mem_Y[0] = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Y) returned: %s (%d)", cluErrorString(ret), ret);
     }
-    mem_Cb = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
+    mem_Cb[0] = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Cb) returned: %s (%d)", cluErrorString(ret), ret);
     }
-    mem_Cr = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
+    mem_Cr[0] = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
     }
 
-    mem_Y_ref = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
+    mem_Y[1] = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Y_ref) returned: %s (%d)", cluErrorString(ret), ret);
     }
-    mem_Cb_ref = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
+    mem_Cb[1] = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Cb_ref) returned: %s (%d)", cluErrorString(ret), ret);
     }
-    mem_Cr_ref = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
+    mem_Cr[1] = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Cr_ref) returned: %s (%d)", cluErrorString(ret), ret);
     }
@@ -699,21 +675,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (indices) returned: %s (%d)", cluErrorString(ret), ret);
     }
-    /*
-      mem_X_OUT = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels_lowPass*sizeof(float), nullptr, &ret);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
-    }
 
-     mem_Y_IN = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels_lowPass*sizeof(float), nullptr, &ret);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    mem_Y_OUT = clCreateBuffer(context, CL_MEM_WRITE_ONLY, npixels_lowPass*sizeof(float), nullptr, &ret);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    */
     char *program_src = NULL;
     cl_program program = cluProgramFromFilename(context, "../resources/kernels/encoder.cl");
     ret = clBuildProgram(program, device_count, devices, NULL, NULL, NULL);
@@ -745,19 +707,6 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
     }
 
-    ret = clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)&mem_Y);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel, 4, sizeof(cl_mem), (void *)&mem_Cb);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel, 5, sizeof(cl_mem), (void *)&mem_Cr);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-
   // ret = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&mem_B);
   // if(CL_SUCCESS != ret){
   //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
@@ -782,37 +731,37 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
     }
     report(PASS, "kernel created");
-    ret = clSetKernelArg(kernel_mvs, 0, sizeof(cl_mem), (void *)&mem_Y);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel_mvs, 1, sizeof(cl_mem), (void *)&mem_Cb);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel_mvs, 2, sizeof(cl_mem), (void *)&mem_Cr);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-
-    ret = clSetKernelArg(kernel_mvs, 3, sizeof(cl_mem), (void *)&mem_Y_ref);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel_mvs, 4, sizeof(cl_mem), (void *)&mem_Cb_ref);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
-    ret = clSetKernelArg(kernel_mvs, 5, sizeof(cl_mem), (void *)&mem_Cr_ref);
-    if(CL_SUCCESS != ret){
-      report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
-    }
+    // ret = clSetKernelArg(kernel_mvs, 0, sizeof(cl_mem), (void *)&mem_Y);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    // }
+    // ret = clSetKernelArg(kernel_mvs, 1, sizeof(cl_mem), (void *)&mem_Cb);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    // }
+    // ret = clSetKernelArg(kernel_mvs, 2, sizeof(cl_mem), (void *)&mem_Cr);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    // }
+    //
+    // ret = clSetKernelArg(kernel_mvs, 3, sizeof(cl_mem), (void *)&mem_Y_ref);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    // }
+    // ret = clSetKernelArg(kernel_mvs, 4, sizeof(cl_mem), (void *)&mem_Cb_ref);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    // }
+    // ret = clSetKernelArg(kernel_mvs, 5, sizeof(cl_mem), (void *)&mem_Cr_ref);
+    // if(CL_SUCCESS != ret){
+    //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
+    // }
 
     ret = clSetKernelArg(kernel_mvs, 6, sizeof(cl_mem), (void *)&mem_indices);
     if(CL_SUCCESS != ret){
       report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
     }
-    
+
     report(PASS, "kernel setup");
 
 
@@ -823,9 +772,8 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
     stream = create_xml_stream(width, height, QUALITY, WINDOW_SIZE, BLOCK_SIZE);
     vector<mVector>* motion_vectors = NULL;
-    vector<mVector>* motion_vectors_orig = NULL;
 
-    for (int frame_number = 0 ; frame_number < end_frame ; frame_number++) {
+    for (frame_number = 0 ; frame_number < end_frame ; frame_number++) {
       frame_rgb = NULL;
       tick(&total_clock);
       tick(&clock);

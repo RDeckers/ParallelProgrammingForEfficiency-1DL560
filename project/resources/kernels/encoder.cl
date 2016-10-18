@@ -77,7 +77,6 @@ void load_block(int loc_id, int block_x, int block_y, int target_offset_x, int t
   int block_start = 16*(block_x+block_y*get_global_size(0));
   local_buffer[get_local_id(0)+16*target_offset_x + 32*(get_local_id(1)+16*target_offset_y)]
     = global_source[block_start+get_local_id(0)+get_local_id(1)*get_global_size(0)];
-  barrier(CLK_LOCAL_MEM_FENCE);
 }
 
 //performs a search over a specific channel and returns a float4 corresponding to the results.
@@ -101,18 +100,22 @@ float4 motionVectorSearch_subroutine(
     load_block(i_loc, block_x-1, block_y-0, 0, 1, channel, tile_buffer);//1
     load_block(i_loc, block_x-0, block_y-1, 1, 0, channel, tile_buffer);//2
     load_block(i_loc, block_x-0, block_y-0, 1, 1, channel, tile_buffer);//3
+    barrier(CLK_LOCAL_MEM_FENCE);
     score[0] = compute_block_delta(x_loc, y_loc, 0,0, ref_block, tile_buffer);
 
     load_block(i_loc, block_x+1, block_y-1, 0, 0, channel, tile_buffer);//4
     load_block(i_loc, block_x+1, block_y-0, 0, 1, channel, tile_buffer);//5
+    barrier(CLK_LOCAL_MEM_FENCE);
     score[1] = compute_block_delta(x_loc, y_loc, 16,0, ref_block, tile_buffer);
 
     load_block(i_loc, block_x+0, block_y+1, 1, 0, channel, tile_buffer);//6
     load_block(i_loc, block_x+1, block_y+1, 0, 0, channel, tile_buffer);//7
+    barrier(CLK_LOCAL_MEM_FENCE);
     score[2] = compute_block_delta(x_loc, y_loc, 16,16, ref_block, tile_buffer);
 
     load_block(i_loc, block_x-1, block_y+1, 0, 0, channel, tile_buffer);//8
     load_block(i_loc, block_x-1, block_y-0, 0, 1, channel, tile_buffer);//1
+    barrier(CLK_LOCAL_MEM_FENCE);
     score[3] = compute_block_delta(x_loc, y_loc, 0, 16, ref_block, tile_buffer);
 
     return score;
@@ -147,7 +150,7 @@ __kernel void motionVectorSearch(
     score = score.xywz;
     //find the minimum element of our vector and it's place.
     int my_min_i = (min(score[0], score[1]) <= min(score[2], score[3])) ? (score[1] <= score[0]) : 2+(score[3] <= score[2]);
-    float my_min = min(min(score.x, score.y), min(score.z, score.w)); //is not deterministic every run
+    float my_min = min(min(score.x, score.y), min(score.z, score.w));
 
     //reuse one of the buffers as an index buffer
     __local int* index_buffer = (__local int*) tile_buffer;
