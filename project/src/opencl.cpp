@@ -17,6 +17,7 @@
 #include <utilities/benchmarking.h>
 #include <algorithm>
 
+#include "../resources/kernels/PipeLineConstants.h"
 
 using namespace std;
 
@@ -39,8 +40,9 @@ using namespace std;
 
 cl_command_queue *com_qs = NULL;
 cl_kernel kernel;
-cl_kernel kernel_lowPass_X;
-cl_kernel kernel_lowPass_Y;
+cl_kernel pipeline_kernel;
+// cl_kernel kernel_lowPass_X;
+// cl_kernel kernel_lowPass_Y;
 cl_kernel kernel_mvs;
 size_t work_dim[2];
 size_t work_item_dim[2];
@@ -588,6 +590,75 @@ void zigZagOrder(Channel* in, Channel* ordered) {
   }
 
 
+
+bool ErrorCheck(cl_int err_code)
+{
+  if(CL_SUCCESS != err_code)
+    {
+      report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(err_code), err_code);
+      return false;
+    }
+  return true;
+}
+void write2CLbuffers(Image* in)
+{
+  //
+  // Write image to openCL buffers
+  //
+  ErrorCheck( clEnqueueWriteBuffer(com_qs[0], mem_R, CL_FALSE, 0, in->rc->size_in_bytes(), in->rc->data, 0, NULL, NULL) );
+  ErrorCheck( clEnqueueWriteBuffer(com_qs[0], mem_G, CL_FALSE, 0, in->gc->size_in_bytes(), in->gc->data, 0, NULL, NULL) );
+  ErrorCheck( clEnqueueWriteBuffer(com_qs[0], mem_B, CL_FALSE, 0, in->bc->size_in_bytes(), in->bc->data, 0, NULL, NULL) );
+}
+
+void setupPipelineKernel(cl_program program,  int image_rows, int image_cols)
+{
+
+  //
+  // get pipeline kernel reference
+  //
+  cl_int ret = CL_SUCCESS;
+  pipeline_kernel = clCreateKernel(program, "RGB2YCbCr_LowPassFilter_pipeline", &ret);
+  ErrorCheck(ret);
+  //
+  // Setup the arguments:
+  //
+  //
+  // Inputs:
+  //
+  ErrorCheck(clSetKernelArg(pipeline_kernel, 0, sizeof(cl_mem), (void *)&mem_R) );
+  ErrorCheck(clSetKernelArg(pipeline_kernel, 1, sizeof(cl_mem), (void *)&mem_G) );
+  ErrorCheck(clSetKernelArg(pipeline_kernel, 2, sizeof(cl_mem), (void *)&mem_B) );
+  //
+  // Outputs
+  //
+  ErrorCheck(clSetKernelArg(pipeline_kernel, 3, sizeof(cl_mem), (void *)&mem_Y) );
+  ErrorCheck(clSetKernelArg(pipeline_kernel, 4, sizeof(cl_mem), (void *)&mem_Cb) );
+  ErrorCheck(clSetKernelArg(pipeline_kernel, 5, sizeof(cl_mem), (void *)&mem_Cr) );
+  //
+  // Constants
+  //
+  ErrorCheck(clSetKernelArg(pipeline_kernel, 6, sizeof(int), (void *)&image_rows) ); //image_rows == image-in->height
+  ErrorCheck(clSetKernelArg(pipeline_kernel, 7, sizeof(int), (void *)&image_cols) );  //image_clos == image-in->width
+
+}
+void RunPipelineKernel(unsigned rows, unsigned cols)
+{
+
+  work_item_dim[0] = DIM_X; // ex 64 - in fast x-dimension
+  work_item_dim[1] = DIM_Y; // ex 8
+  work_dim[0] = cols;   // x-direction
+  work_dim[1] = rows;
+  report(INFO, "trying to run kernel with [%u, %u] and [%u, %u]", DIM_X, DIM_Y, cols, rows);
+  //enque the kernel
+  cl_int ret;
+  if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], pipeline_kernel, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
+    report(FAIL, "clEnqueueNDRangeKernel(pipeline) returned: %s (%d)", cluErrorString(ret), ret);
+    exit(-1);
+  }
+  clFinish(com_qs[0]);
+
+}
+
   int encode() {
     REPORT_W_COLORS = 1;
     REPORT_W_TIMESTAMPS = 1;
@@ -727,6 +798,14 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     }
     free(log);
     report(PASS, "program build");
+    
+    //
+    // Setup the pipeline kernel
+    //
+    //int rows = frame_rgb->height;
+    //int cols = frame_rgb->width;
+    setupPipelineKernel(program, height, width); //convertRGB + lowPass
+    /*//////////
     kernel = clCreateKernel(program, "convertRGBtoYCbCr", &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
@@ -757,6 +836,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     if(CL_SUCCESS != ret){
       report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
     }
+    *///////////
 
   // ret = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&mem_B);
   // if(CL_SUCCESS != ret){
@@ -767,6 +847,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
   //   report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
   // }
 
+    /*//////////
     kernel_lowPass_X = clCreateKernel(program, "lowPass_X", &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
@@ -776,7 +857,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
     }
-
+    *///////////
     kernel_mvs = clCreateKernel(program, "motionVectorSearch", &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
@@ -836,6 +917,14 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       uploadData_cl(frame_rgb);
       transfer_t[frame_number] = elapsed_since(&clock);
 
+      //convertRGB + lowPass
+      report(INFO, "Covert to YCbCr + Low pass filter...");
+      tick(&clock);
+      RunPipelineKernel(height, width);
+      convert_t[frame_number] = elapsed_since(&clock);
+      lowpass_t[frame_number] = elapsed_since(&clock); //each get half time?
+
+      /*//////////
       //  Convert to YCbCr
       report(INFO, "Covert to YCbCr...");
       Image* frame_ycbcr = new Image(width, height, FULLSIZE);
@@ -858,7 +947,8 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       tick(&clock);
       lowPass_cl();
       lowpass_t[frame_number] = elapsed_since(&clock);
-
+      *///////////
+      Frame *frame_lowpassed = new Frame(width, height, FULLSIZE);
       //readback the data
       tick(&clock);
       readbackData_cl(frame_lowpassed);
