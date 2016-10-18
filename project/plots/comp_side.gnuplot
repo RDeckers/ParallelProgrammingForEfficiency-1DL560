@@ -5,7 +5,7 @@ set key outside;
 set key center top;
 #set format x "2^{%L}"
 set ylabel "runtime (ns)"
-set yrange [0:2*10**8]
+#set yrange [0:2*10**8]
 #set xlabel "Image dimensions (width & height)"
 set grid xtics ytics;
 #set logscale y;

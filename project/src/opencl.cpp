@@ -58,8 +58,8 @@ cl_mem mem_Cr_ref;
 cl_mem mem_Cb_ref;
 
 cl_mem mem_lowPass;
-cl_mem mem_indices;
 
+cl_mem mem_indices;
 
 //can be optimized by saving bytes instead of floats and converting dynamically.
 //also should load next frame async in the background.
@@ -241,13 +241,14 @@ std::vector<mVector>* motionVectorSearch_cl(Frame* in, int32_t *indices){
   clFinish(com_qs[0]);
 
   //report(INFO,"there are %d groups", num_groups);
-  for(int y = 1; y < work_dim[1]/work_item_dim[1]-1; y++){
-    for(int x = 1; x < work_dim[0]/work_item_dim[0]-1; x++){
+  for(int x = 1; x < work_dim[1]/work_item_dim[1]-1; x++){
+    for(int y = 1; y < work_dim[0]/work_item_dim[0]-1; y++){
       int i = x + y*(work_dim[0]/work_item_dim[0]);
+      //float val = scores[i];
       int index = indices[i];
-      report(INFO,"(%d, %d)", i, index);
-      int offset_x = (index%32)-16;
-      int offset_y = (index/32)-16;
+      int offset_y = (index%32)-16;
+      int offset_x = (index/32)-16;
+      //report(INFO,"%i -> (%d, %d)", i, offset_x, offset_y);
       // if((index <  0) || (index >= 32*32))
       //   report(WARN,"%d -> %d", i, indices[i]);
       mVector v;
@@ -340,6 +341,7 @@ std::vector<mVector>* motionVectorSearch(Frame* source, Frame* match, int width,
       }
 
       //store the best.
+      report(PASS, "%d, %f", motion_vectors->size(), best_match_sad);
       mVector v;
       v.a=best_match_location[0];
       v.b=best_match_location[1];
@@ -774,7 +776,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
     }
-    report(WARN, "TRYING TO CREATE KERNEL");
+
     kernel_mvs = clCreateKernel(program, "motionVectorSearch", &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateKernel returned: %s (%d)", cluErrorString(ret), ret);
@@ -810,6 +812,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     if(CL_SUCCESS != ret){
       report(FAIL, "clSetKernelArg returned: %s (%d)", cluErrorString(ret), ret);
     }
+    
     report(PASS, "kernel setup");
 
 
@@ -876,16 +879,6 @@ void zigZagOrder(Channel* in, Channel* ordered) {
         tick(&clock);
         motion_vectors = motionVectorSearch_cl(previous_frame_lowpassed, indices);
         mvs_t[frame_number] = elapsed_since(&clock);
-
-        tick(&clock);
-        motion_vectors_orig = motionVectorSearch(previous_frame_lowpassed, frame_lowpassed, frame_lowpassed->width, frame_lowpassed->height);
-        mvs_t[frame_number] = elapsed_since(&clock);
-
-        for(int i = 0; i < motion_vectors_orig->size();i++){
-          if((motion_vectors_orig->at(i).a != motion_vectors->at(i).a) || (motion_vectors_orig->at(i).b != motion_vectors->at(i).b)){
-            report(FAIL, "%d] (%d, %d) != (%d, %d)", i, motion_vectors_orig->at(i).a, motion_vectors_orig->at(i).b, motion_vectors->at(i).a, motion_vectors->at(i).b);
-          }
-        }
 
         report(INFO, "Compute Delta...");
         tick(&clock);

@@ -55,16 +55,18 @@ __kernel void lowPass_X(__global const float *in, __global float *out){
 }
 
 //computes the sum of absolute differences between a 16x16 tile and the reference.
-float compute_block_delta(int x_loc, int y_loc, __local float* refference, __local float* buffer){
+float compute_block_delta(int x_loc, int y_loc, int start_x, int start_y, __local float* refference, __local float* buffer){
   float delta = 0;
+  x_loc += start_x;
+  y_loc += start_y;
   for(int y = 0; y < 16; y++){
-    int y_buf = (y_loc+y)&31;
-    //int y_overflow = (y_buf >= 16? 1:0);//return 1 or 0.
+    int y_buf = (y_loc+y)%32;
     for(int x = 0; x < 16; x++){
-      int x_buf = (x_loc+x)&31;
+      int x_buf = (x_loc+x)%32;
       delta += fabs(buffer[x_buf+32*y_buf]-refference[x+16*y]);
     }
   }
+  barrier(CLK_LOCAL_MEM_FENCE);
   return delta;
 }
 
@@ -73,7 +75,9 @@ void load_block(int loc_id, int block_x, int block_y, int target_offset_x, int t
   block_x = clamp(block_x, (int)0, (int)get_num_groups(0));
   block_y = clamp(block_y, (int)0, (int)get_num_groups(1));
   int block_start = 16*(block_x+block_y*get_global_size(0));
-  local_buffer[loc_id+16*target_offset_x+32*16*target_offset_y] = global_source[block_start+get_local_id(0)+get_local_id(1)*get_global_size(0)];
+  local_buffer[get_local_id(0)+16*target_offset_x + 32*(get_local_id(1)+16*target_offset_y)]
+    = global_source[block_start+get_local_id(0)+get_local_id(1)*get_global_size(0)];
+  barrier(CLK_LOCAL_MEM_FENCE);
 }
 
 //performs a search over a specific channel and returns a float4 corresponding to the results.
@@ -97,30 +101,26 @@ float4 motionVectorSearch_subroutine(
     load_block(i_loc, block_x-1, block_y-0, 0, 1, channel, tile_buffer);//1
     load_block(i_loc, block_x-0, block_y-1, 1, 0, channel, tile_buffer);//2
     load_block(i_loc, block_x-0, block_y-0, 1, 1, channel, tile_buffer);//3
-    //make sure all writes to local memory have finished
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[0] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
+    score[0] = compute_block_delta(x_loc, y_loc, 0,0, ref_block, tile_buffer);
+
     load_block(i_loc, block_x+1, block_y-1, 0, 0, channel, tile_buffer);//4
     load_block(i_loc, block_x+1, block_y-0, 0, 1, channel, tile_buffer);//5
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[1] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
+    score[1] = compute_block_delta(x_loc, y_loc, 16,0, ref_block, tile_buffer);
+
     load_block(i_loc, block_x+0, block_y+1, 1, 0, channel, tile_buffer);//6
     load_block(i_loc, block_x+1, block_y+1, 0, 0, channel, tile_buffer);//7
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[2] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
+    score[2] = compute_block_delta(x_loc, y_loc, 16,16, ref_block, tile_buffer);
+
     load_block(i_loc, block_x-1, block_y+1, 0, 0, channel, tile_buffer);//8
-    //TODO: keep in local memory?
     load_block(i_loc, block_x-1, block_y-0, 0, 1, channel, tile_buffer);//1
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[3] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
+    score[3] = compute_block_delta(x_loc, y_loc, 0, 16, ref_block, tile_buffer);
+
     return score;
   }
 
 __kernel void motionVectorSearch(
-    __global float const *Y, __global float const *Cr, __global float const *Cb,//the channels of our new frame
-    __global float const *ref_Y, __global float const *ref_Cr, __global float const *ref_Cb, //channels of out reference frame
-    //__local float *ref_block, //The buffer block for our old reference array.
-    //__local float *tile_buffer_1, __local float *tile_buffer_2, __local float *tile_buffer_3, __local float *tile_buffer_4, __local float *tile_buffer_5, //buffers for our tiles
+    __global float const *ref_Y, __global float const *ref_Cb, __global float const *ref_Cr,//the channels of our new frame
+    __global float const *Y, __global float const *Cb, __global float const *Cr, //channels of out reference frame
     __global int *indices
   ){
     __local float ref_block[16*16];
@@ -147,7 +147,7 @@ __kernel void motionVectorSearch(
     score = score.xywz;
     //find the minimum element of our vector and it's place.
     int my_min_i = (min(score[0], score[1]) <= min(score[2], score[3])) ? (score[1] <= score[0]) : 2+(score[3] <= score[2]);
-    float my_min = min(min(score.x, score.y), min(score.z, score.w));
+    float my_min = min(min(score.x, score.y), min(score.z, score.w)); //is not deterministic every run
 
     //reuse one of the buffers as an index buffer
     __local int* index_buffer = (__local int*) tile_buffer;
