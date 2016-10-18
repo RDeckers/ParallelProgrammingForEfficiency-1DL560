@@ -223,7 +223,9 @@ std::vector<mVector>* motionVectorSearch_cl(Frame* in, int32_t *indices){
   clFinish(com_qs[0]);
 
   //run the kernel
+
   work_item_dim[0] = work_item_dim[1] = 16;
+  //report(INFO, "running over [%u, %u] in [%u, %u] groups", work_dim[0], work_dim[1], work_item_dim[0], work_item_dim[1]);
   if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_mvs, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
         report(FAIL, "enqueue kernel (mvs) returned: %s (%d)",cluErrorString(ret), ret);
         return nullptr;
@@ -232,18 +234,27 @@ std::vector<mVector>* motionVectorSearch_cl(Frame* in, int32_t *indices){
 
   int num_groups = work_dim[0]*work_dim[1]/(work_item_dim[0]*work_item_dim[1]);
   //read back the data
-  ret = clEnqueueReadBuffer(com_qs[0], mem_indices, CL_FALSE, 0, num_groups, indices, 0, NULL, NULL);
+  ret = clEnqueueReadBuffer(com_qs[0], mem_indices, CL_FALSE, 0, num_groups*sizeof(float), indices, 0, NULL, NULL);
   if(CL_SUCCESS != ret){
     report(FAIL, "clEnqueueReadBuffer returned: %s (%d)", cluErrorString(ret), ret);
   }
   clFinish(com_qs[0]);
 
   //report(INFO,"there are %d groups", num_groups);
-  for(int i = 0; i < num_groups; i++){
-    mVector v;
-    v.a=0;
-    v.b=0;
-    motion_vectors->push_back(v);
+  for(int y = 1; y < work_dim[1]/work_item_dim[1]-1; y++){
+    for(int x = 1; x < work_dim[0]/work_item_dim[0]-1; x++){
+      int i = x + y*(work_dim[0]/work_item_dim[0]);
+      int index = indices[i];
+      report(INFO,"(%d, %d)", i, index);
+      int offset_x = (index%32)-16;
+      int offset_y = (index/32)-16;
+      // if((index <  0) || (index >= 32*32))
+      //   report(WARN,"%d -> %d", i, indices[i]);
+      mVector v;
+      v.a=offset_x;
+      v.b=offset_y;
+      motion_vectors->push_back(v);
+    }
   }
   return motion_vectors;
 }
@@ -662,15 +673,15 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       report(FAIL, "clCreateBuffer (Cr) returned: %s (%d)", cluErrorString(ret), ret);
     }
 
-    mem_Y_ref = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
+    mem_Y_ref = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Y_ref) returned: %s (%d)", cluErrorString(ret), ret);
     }
-    mem_Cb_ref = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
+    mem_Cb_ref = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Cb_ref) returned: %s (%d)", cluErrorString(ret), ret);
     }
-    mem_Cr_ref = clCreateBuffer(context, CL_MEM_READ_WRITE, npixels*sizeof(float), nullptr, &ret);
+    mem_Cr_ref = clCreateBuffer(context, CL_MEM_READ_ONLY, npixels*sizeof(float), nullptr, &ret);
     if(CL_SUCCESS != ret){
       report(FAIL, "clCreateBuffer (Cr_ref) returned: %s (%d)", cluErrorString(ret), ret);
     }
@@ -706,13 +717,13 @@ void zigZagOrder(Channel* in, Channel* ordered) {
     ret = clBuildProgram(program, device_count, devices, NULL, NULL, NULL);
     if(CL_SUCCESS != ret){
       report(FAIL, "clBuildProgram returned: %s (%d)", cluErrorString(ret), ret);
-      char *log = NULL;
+    }
+    char *log = NULL;
     for(int i = 0; i < device_count; i++){
       cluGetProgramLog(program, devices[0], CLU_DYNAMIC, &log);
       report(INFO, "log device[%d]\n==============\n%s",i, log);
     }
     free(log);
-    }
     report(PASS, "program build");
     kernel = clCreateKernel(program, "convertRGBtoYCbCr", &ret);
     if(CL_SUCCESS != ret){
@@ -809,6 +820,7 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
     stream = create_xml_stream(width, height, QUALITY, WINDOW_SIZE, BLOCK_SIZE);
     vector<mVector>* motion_vectors = NULL;
+    vector<mVector>* motion_vectors_orig = NULL;
 
     for (int frame_number = 0 ; frame_number < end_frame ; frame_number++) {
       frame_rgb = NULL;
@@ -865,6 +877,16 @@ void zigZagOrder(Channel* in, Channel* ordered) {
         motion_vectors = motionVectorSearch_cl(previous_frame_lowpassed, indices);
         mvs_t[frame_number] = elapsed_since(&clock);
 
+        tick(&clock);
+        motion_vectors_orig = motionVectorSearch(previous_frame_lowpassed, frame_lowpassed, frame_lowpassed->width, frame_lowpassed->height);
+        mvs_t[frame_number] = elapsed_since(&clock);
+
+        for(int i = 0; i < motion_vectors_orig->size();i++){
+          if((motion_vectors_orig->at(i).a != motion_vectors->at(i).a) || (motion_vectors_orig->at(i).b != motion_vectors->at(i).b)){
+            report(FAIL, "%d] (%d, %d) != (%d, %d)", i, motion_vectors_orig->at(i).a, motion_vectors_orig->at(i).b, motion_vectors->at(i).a, motion_vectors->at(i).b);
+          }
+        }
+
         report(INFO, "Compute Delta...");
         tick(&clock);
         frame_lowpassed_final = computeDelta(previous_frame_lowpassed, frame_lowpassed, motion_vectors);
@@ -886,8 +908,8 @@ void zigZagOrder(Channel* in, Channel* ordered) {
 
       Frame* frame_downsampled = new Frame(width, height, DOWNSAMPLE);
       // We don't touch the Y frame
-      frame_downsampled->Y->copy(frame_lowpassed_final->Y);
       tick(&clock);
+      frame_downsampled->Y->copy(frame_lowpassed_final->Y);
       downSample_frame(frame_lowpassed_final, frame_downsampled);
       downsample_t[frame_number] = elapsed_since(&clock);
 
