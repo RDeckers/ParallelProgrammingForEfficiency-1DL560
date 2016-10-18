@@ -86,61 +86,57 @@ void loadImage(int number, string path, Image** photo) {
 
 }
 
+void convertRGBtoYCbCr(Image* in, Image* out){
+    int width = in->width;
+    int height = in->height;
 
-void convertRGBtoYCbCr(Image* in, Image *out) {
-	int width = in->width;
-	int height = in->height;
-#ifdef PARALLEL_OPT
-#pragma omp parallel for
-#endif
-	for (int i = 0; i < width*height; i+=8) {
-    //memory bound because changing this += 8 to +=16 (same amournt of CLs, half the compute) does not affect the result.
-    //In order to speed things up more, we should change it to so that the input is bytes. which would still be memory bound, but less so.
-    //loads and stores 3*2048*2048*4*2 bytes,
-    // @25.6 GB/s = 3.9e6 ns
-			v8f R = in->rc->get_8(i);
-			v8f G = in->gc->get_8(i);
-			v8f B = in->bc->get_8(i);
-			v8f Y = 0.0f + (0.299f*R); + (0.587f*G) + (0.113f*B);
-			v8f Cb = 128.0f - (0.168736f*R) - (0.331264f*G) + (0.5f*B);
-			v8f Cr = 128.0f + (0.5f*R) - (0.418688f*G) - (0.081312f*B);
-      _mm256_stream_ps(out->rc->data+i, Y);
-      _mm256_stream_ps(out->gc->data+i, Cb);
-      _mm256_stream_ps(out->bc->data+i, Cr);
-			// in->rc->set_8(i, Y);
-			// in->gc->set_8(i, Cb);
-			// in->bc->set_8(i, Cr);
-		}
-  _mm_mfence();
+		for(int y=0; y<width; y++) {
+			for (int x = 0; x<height; x++) {
+
+			float R = in->rc->data[x*width+y];
+			float G = in->gc->data[x*width+y];
+			float B = in->bc->data[x*width+y];
+			float Y = 0+((float)0.299*R)+((float)0.587*G)+((float)0.113*B);
+			float Cb = 128-((float)0.168736*R)-((float)0.331264*G)+((float)0.5*B);
+            float Cr = 128+((float)0.5*R)-((float)0.418688*G)-((float)0.081312*B);
+			out->rc->data[x*width+y] = Y;
+			out->gc->data[x*width+y] = Cb;
+			out->bc->data[x*width+y] = Cr;
+        }
+    }
+
+    //return out;
 }
 
 Channel* lowPass(Channel* in, Channel* out){
-  // Applies a simple 3-tap low-pass filter in the X- and Y- dimensions.
-  // E.g., blur
-  // weights for neighboring pixels
-  float a=0.25;
-  float b=0.5;
-  float c=0.25;
+    // Applies a simple 3-tap low-pass filter in the X- and Y- dimensions.
+    // E.g., blur
+    // weights for neighboring pixels
+    float a=0.25;
+    float b=0.5;
+    float c=0.25;
 
-  int width = in->width;
-  int height = in->height;
+	int width = in->width;
+	int height = in->height;
 
-  out->copy(in);
+    //out = in; TODO Is this necessary?
+	for(int i=0; i<width*height; i++) out->data[i] =in->data[i];
 
-  // In X
-  for (int y=1; y<(width-1); y++) {
-    for (int x=1; x<(height-1); x++) {
-      out->get_ref(y,x) = a*in->get(y,x-1)+b*in->get(y,x)+c*in->get(y, x+1);
+
+    // In X
+    for (int y=1; y<(width-1); y++) {
+        for (int x=1; x<(height-1); x++) {
+            out->data[x*width+y] = a*in->data[(x-1)*width+y]+b*in->data[x*width+y]+c*in->data[(x+1)*width+y];
+        }
     }
-  }
-  // In Y
-  for (int y=1; y<(width-1); y++) {
-    for (int x=1; x<(height-1); x++) {
-      out->get_ref(y, x) = a*out->get(y-1, x) + b*out->get(y, x) + c*out->get(y+1, x);
+    // In Y
+    for (int y=1; y<(width-1); y++) {
+        for (int x=1; x<(height-1); x++) {
+            out->data[x*width+y] = a*out->data[x*width+(y-1)]+b*out->data[x*width+y]+c*out->data[x*width+(y+1)];
+        }
     }
-  }
 
-  return out;
+    return out;
 }
 
 
@@ -243,17 +239,24 @@ Frame* computeDelta(Frame* i_frame_ycbcr, Frame* p_frame_ycbcr, std::vector<mVec
   return delta;
 }
 
-//mem but not simd
-Frame* downSample_frame(Frame* in, Frame* out){
-  int w2 = out->Cb->width;
-  int h2 = out->Cb->height;
-  for(int y2=0; y2<h2; y2++) {
-    for (int x2 = 0; x2<w2; x2++) {
-      out->Cb->set(x2, y2, in->Cb->get(x2*2,y2*2));
-      out->Cr->set(x2, y2, in->Cr->get(x2*2,y2*2));
+Channel* downSample(Channel* in){
+	int width = in->width;
+	int height = in->height;
+	int w2=width/2;
+	int h2=height/2;
+
+	Channel* out = new Channel((width/2),(height/2));
+
+		for(int y2=0,y=0; y2<w2; y2++) {
+			for (int x2 = 0, x = 0; x2<h2; x2++) {
+
+            out->data[x2*w2+y2]= in->data[x*width+y];
+            x+=2;
+        }
+        y+=2;
     }
-  }
-  return out;
+
+    return out;
 }
 
 void dct8x8(Channel* in, Channel* out){
@@ -543,10 +546,14 @@ void zigZagOrder(Channel* in, Channel* ordered) {
       report(INFO, "Downsample...");
 
       Frame* frame_downsampled = new Frame(width, height, DOWNSAMPLE);
+      tick(&clock);
       // We don't touch the Y frame
       frame_downsampled->Y->copy(frame_lowpassed_final->Y);
-      tick(&clock);
-      downSample_frame(frame_lowpassed_final, frame_downsampled);
+      Channel* frame_downsampled_cb = downSample(frame_lowpassed_final->Cb);
+      frame_downsampled->Cb->copy(frame_downsampled_cb);
+      Channel* frame_downsampled_cr = downSample(frame_lowpassed_final->Cr);
+      frame_downsampled->Cr->copy(frame_downsampled_cr);
+      //downSample_frame(frame_lowpassed_final, frame_downsampled);
       downsample_t[frame_number] = elapsed_since(&clock);
 
       dump_frame(frame_downsampled, "frame_downsampled", frame_number);
