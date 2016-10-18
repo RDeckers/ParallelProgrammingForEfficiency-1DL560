@@ -55,29 +55,25 @@ __kernel void lowPass_X(__global const float *in, __global float *out){
 }
 
 //computes the sum of absolute differences between a 16x16 tile and the reference.
-float compute_block_delta(int x_loc, int y_loc, __local float* refference, __local float *NW, __local float *SW, __local float *NE, __local float *SE){
-  //TODO: compare with using one big __local buffer and reordering data when needed.
-  __local float *tiles[4] = {NW, SW, NE, SE};//hacky way to select the write tile to read from without if's.
+float compute_block_delta(int x_loc, int y_loc, __local float* refference, __local float* buffer){
   float delta = 0;
   for(int y = 0; y < 16; y++){
-    int y_buf = y_loc+y;
-    int y_overflow = (y_buf >= 16);//return 1 or 0.
+    int y_buf = (y_loc+y)&31;
+    //int y_overflow = (y_buf >= 16? 1:0);//return 1 or 0.
     for(int x = 0; x < 16; x++){
-      int x_buf = x_loc+x;
-      int x_overflow = (x_buf >= 16);
-      __local float *current_tile = tiles[y_overflow+2*x_overflow];//gives an index in [0,1,2,3] corresponding to the overflow in x and y
-      delta += fabs(current_tile[(x_buf&15)+16*(y_buf&16)]-refference[x+16*y]);
+      int x_buf = (x_loc+x)&31;
+      delta += fabs(buffer[x_buf+32*y_buf]-refference[x+16*y]);
     }
   }
   return delta;
 }
 
 //performs bounds checking
-void load_block(int loc_id, int block_x, int block_y, __global float *global_source, __local float *local_buffer){
+void load_block(int loc_id, int block_x, int block_y, int target_offset_x, int target_offset_y,__global float const *global_source, __local float *local_buffer){
   block_x = clamp(block_x, (int)0, (int)get_num_groups(0));
   block_y = clamp(block_y, (int)0, (int)get_num_groups(1));
   int block_start = 16*(block_x+block_y*get_global_size(0));
-  local_buffer[loc_id] = global_source[block_start+loc_id];
+  local_buffer[loc_id+16*target_offset_x+32*16*target_offset_y] = global_source[block_start+get_local_id(0)+get_local_id(1)*get_global_size(0)];
 }
 
 //performs a search over a specific channel and returns a float4 corresponding to the results.
@@ -85,9 +81,9 @@ void load_block(int loc_id, int block_x, int block_y, __global float *global_sou
 float4 motionVectorSearch_subroutine(
   int i_glob, int stride_glob,
   int x_loc, int y_loc, int i_loc,
-  __global float *channel, __global float *ref_channel,
+  __global float const  *channel, __global float const *ref_channel,
   __local float *ref_block, //The buffer block for our old reference array.
-  __local float *tile_buffer_1, __local float *tile_buffer_2, __local float *tile_buffer_3, __local float *tile_buffer_4, __local float *tile_buffer_5 //buffers for our tiles
+  __local float *tile_buffer //buffers for our tiles
   ){
     int block_x = get_group_id(0);
     int block_y = get_group_id(1);
@@ -96,40 +92,39 @@ float4 motionVectorSearch_subroutine(
     //buffer our reference block into local memorchannel. (4bchanneltes per float, 3 floats per pixel, 256 pixels)
     ref_block[i_loc] = ref_channel[i_glob];
     //Buffer the compared blocks
-    load_block(i_loc, block_x-1, block_y-1, channel, tile_buffer_1);
-    load_block(i_loc, block_x-1, block_y-0, channel, tile_buffer_2);
-    load_block(i_loc, block_x-0, block_y-1, channel, tile_buffer_3);
-    load_block(i_loc, block_x-0, block_y+0, channel, tile_buffer_3);
+    //TODO: make one function call.
+    load_block(i_loc, block_x-1, block_y-1, 0, 0, channel, tile_buffer);//0
+    load_block(i_loc, block_x-1, block_y-0, 0, 1, channel, tile_buffer);//1
+    load_block(i_loc, block_x-0, block_y-1, 1, 0, channel, tile_buffer);//2
+    load_block(i_loc, block_x-0, block_y-0, 1, 1, channel, tile_buffer);//3
     //make sure all writes to local memory have finished
     barrier(CLK_LOCAL_MEM_FENCE);
-    score[0] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4);
-    load_block(i_loc, block_x+1, block_y-1, channel, tile_buffer_5);
-    load_block(i_loc, block_x+1, block_y-0, channel, tile_buffer_1);
+    score[0] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
+    load_block(i_loc, block_x+1, block_y-1, 0, 0, channel, tile_buffer);//4
+    load_block(i_loc, block_x+1, block_y-0, 0, 1, channel, tile_buffer);//5
     barrier(CLK_LOCAL_MEM_FENCE);
-    score[1] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer_3, tile_buffer_4, tile_buffer_5, tile_buffer_1);
-    load_block(i_loc, block_x-1, block_y+1, channel, tile_buffer_3);
-    load_block(i_loc, block_x-0, block_y+1, channel, tile_buffer_5);
+    score[1] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
+    load_block(i_loc, block_x+0, block_y+1, 1, 0, channel, tile_buffer);//6
+    load_block(i_loc, block_x+1, block_y+1, 0, 0, channel, tile_buffer);//7
     barrier(CLK_LOCAL_MEM_FENCE);
-    score[2] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer_2, tile_buffer_3, tile_buffer_4, tile_buffer_5);
-    load_block(i_loc, block_x+1, block_y+1, channel, tile_buffer_2);
+    score[2] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
+    load_block(i_loc, block_x-1, block_y+1, 0, 0, channel, tile_buffer);//8
+    //TODO: keep in local memory?
+    load_block(i_loc, block_x-1, block_y-0, 0, 1, channel, tile_buffer);//1
     barrier(CLK_LOCAL_MEM_FENCE);
-    score[3] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer_4, tile_buffer_5, tile_buffer_1, tile_buffer_5);
+    score[3] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
     return score;
   }
 
 __kernel void motionVectorSearch(
-    __global float *Y, __global float *Cr, __global float *Cb,//the channels of our new frame
-    __global float *ref_Y, __global float *ref_Cr, __global float *ref_Cb, //channels of out reference frame
+    __global float const *Y, __global float const *Cr, __global float const *Cb,//the channels of our new frame
+    __global float const *ref_Y, __global float const *ref_Cr, __global float const *ref_Cb, //channels of out reference frame
     //__local float *ref_block, //The buffer block for our old reference array.
     //__local float *tile_buffer_1, __local float *tile_buffer_2, __local float *tile_buffer_3, __local float *tile_buffer_4, __local float *tile_buffer_5, //buffers for our tiles
     __global int *indices
   ){
     __local float ref_block[16*16];
-    __local float tile_buffer_1[16*16];
-    __local float tile_buffer_2[16*16];
-    __local float tile_buffer_3[16*16];
-    __local float tile_buffer_4[16*16];
-    __local float tile_buffer_5[16*16];
+    __local float tile_buffer[32*32];
     //TODO: verify
     // Get the index of the current element to be processed
     int x_glob = get_global_id(0);
@@ -145,38 +140,44 @@ __kernel void motionVectorSearch(
 
     float4 score = {0,0,0,0};//score here tracks which offset gives the best motion vector, lower is better.
 
-    score += 0.50f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Y, ref_Y, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4, tile_buffer_5);
-    score += 0.25f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Cr, ref_Cr, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4, tile_buffer_5);
-    score += 0.25f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Cb, ref_Cb, ref_block, tile_buffer_1, tile_buffer_2, tile_buffer_3, tile_buffer_4, tile_buffer_5);
+    score += 0.50f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Y, ref_Y, ref_block, tile_buffer);
+    score += 0.25f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Cr, ref_Cr, ref_block, tile_buffer);
+    score += 0.25f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Cb, ref_Cb, ref_block, tile_buffer);
 
+    score = score.xywz;
     //find the minimum element of our vector and it's place.
     int my_min_i = (min(score[0], score[1]) <= min(score[2], score[3])) ? (score[1] <= score[0]) : 2+(score[3] <= score[2]);
     float my_min = min(min(score.x, score.y), min(score.z, score.w));
 
     //reuse one of the buffers as an index buffer
-    __local int* index_buffer = (__local int*) tile_buffer_1;
-    int my_index = 4*i_loc+my_min_i;
+    __local int* index_buffer = (__local int*) tile_buffer;
+    //should be [-16,15]
+    //reshift to [0,32]x[0,32] and flatten
+    //conver back to proper coordinates on cpu.
+    int my_index = (x_loc+16*(my_min_i&1))+32*(y_loc+8*(my_min_i&2));
 
     ref_block[i_loc] = my_min;//reuse the ref_block for storing our minimum values, then reduce in local memory to get actual minium
     index_buffer[i_loc] = my_index;//reuse the tile_buffer_1 as an interger storage for the index.
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    //TODO: test, vectorize, compare with readback, unroll loop.
-    //16x16 = 256 elements, we start at 128. so log2(128) iterations = 128->64->32->16->8->4->2->1 = 7 iterations. Less with vectorization.
-    for(uint participants = (stride_loc*get_local_size(1))/2; participants >= 1; participants /= 2){
+    // TODO: test, vectorize, compare with readback, unroll loop.
+    // 16x16 = 256 elements, we start at 128. so log2(128) iterations = 128->64->32->16->8->4->2->1 = 7 iterations. Less with vectorization.
+    for(uint participants = 128; participants >= 1; participants /= 2){
       if(i_loc < participants){
         float my_new = ref_block[i_loc+participants];
         int my_new_index = index_buffer[i_loc+participants];
-        int selection_mask = my_new < my_min;
+        //no barrier needed here, because all the writes in this section are not read until the next one.
+        int selection_mask = my_min < my_new;
         my_min = select(my_new, my_min, selection_mask);
         my_index = select(my_new_index, my_index, selection_mask);
-        ref_block[i_loc] = my_min;//reuse the ref_block for storing our minimum values, then reduce in local memory to get actual minium
-        index_buffer[i_loc] = my_index;//reuse the tile_buffer_1 as an interger storage for the index.
+        ref_block[i_loc] = my_min;
+        index_buffer[i_loc] = my_index;
       }
       barrier(CLK_LOCAL_MEM_FENCE);//barrier outside if so everyone hits it.
     }
     //now the first work-item will have computed the minium.
     if(i_loc == 0){
-      indices[get_group_id(0)+get_group_id(1)*get_num_groups(0)] = my_index;
+      int group_id = get_group_id(0)+get_group_id(1)*get_num_groups(0);
+      indices[group_id] = my_index;
     }
 }
