@@ -1,68 +1,166 @@
-__kernel void convertRGBtoYCbCr(
-    __global float *R, __global float *G, __global float *B,
-    __global float *Y, __global float *Cb, __global float *Cr
-  ){
-    // Get the index of the current element to be processed
-    int i = get_global_id(0);
-    float r = R[i];
-    float g = G[i];
-    float b = B[i];
-    Y[i] = 0.0f +      (0.299f*r) +    (0.587f*g) +    (0.113f*b);
-    Cb[i] = 128.0f - (0.168736f*r) - (0.331264f*g) +      (0.5f*b);
-    Cr[i] = 128.0f +      (0.5f*r) - (0.418688f*g) - (0.081312f*b);
+#include "../resources/kernels/PipeLineConstants.h"
+
+
+void d_RGB2YCbCr( float R,
+                  float G,
+                  float B,
+                  float* Y,
+                  float* Cb,
+                  float* Cr)
+{
+    Y [0] = 0.0f +      (0.299f*R) +    (0.587f*G) +    (0.113f*B);
+    Cb[0] = 128.0f - (0.168736f*R) - (0.331264f*G) +      (0.5f*B);
+    Cr[0] = 128.0f +      (0.5f*R) - (0.418688f*G) - (0.081312f*B);
 }
 
-__kernel void lowPass_Y(__global const float *in, __global float *out){
-   float a = 0.25f;
-  float b = 0.5f;
-  float c = 0.25f;
-
-  // Get the index of the current element to be processed
-  int y_glob = get_global_id(0) + 1;
-  int x_glob = get_global_id(1) + 1;
-  int stride_glob = get_global_size(0) + 2;
-
-  int i_glob = x_glob + y_glob*stride_glob;
-  int i_glob_up = x_glob + (y_glob-1)*stride_glob;
-  int i_glob_down = x_glob + (y_glob+1)*stride_glob;
-  //
-  float up= in[i_glob_up];
-  float middle = in[i_glob];
-  float down = in[i_glob_down];
-
-  out[i_glob] = a*up + b*middle + c*down;
+void d_conv( float tl,
+	     float tm,
+	     float tr,
+	     float ll,
+	     float mm,
+	     float rr,
+	     float bl,
+	     float bm,
+	     float br,
+	     float* res)
+{
+  float corner =  1.0f/16.0f ;
+  float neighb =  1.0f/8.0f ;
+  float self =  1.0f/4.0f ;
+  res[0] = corner * tl + neighb * tm +  corner * tr
+    + neighb * ll +  self * mm + neighb * rr
+    + corner * bl + neighb * bm +  corner * br;
 }
 
-__kernel void lowPass_X(__global const float *in, __global float *out){
-  float a = 0.25f;
-  float b = 0.5f;
-  float c = 0.25f;
+__kernel void RGB2YCbCr_LowPassFilter_pipeline( __global float *g_R,
+                                                __global float *g_G,
+                                                __global float *g_B,
+                                                __global float *g_Y,
+                                                __global float *g_Cb,
+                                                __global float *g_Cr,
+                                                int rows,
+                                                int cols)
+{
 
-  // Get the index of the current element to be processed
-  int y_glob = get_global_id(0) + 1;
-  int x_glob = get_global_id(1) + 1;
-  int stride_glob = get_global_size(0) + 2;
+  __local float lmem_Y [LMEM_Y][LMEM_X];
+  __local float lmem_Cb[LMEM_Y][LMEM_X];
+  __local float lmem_Cr[LMEM_Y][LMEM_X];
 
-  int i_glob  = x_glob + y_glob*stride_glob;
-  int i_left  = x_glob + y_glob*stride_glob-1;
-  int i_right = x_glob + y_glob*stride_glob+1;
+  // Global X&Y index:
+  // One thread/WORK_ITEM per input and output element
+  int g_tx = get_global_id(0);
+  int g_ty = get_global_id(1);
+  // Memory pitch:
+  int pitch = get_global_size(0);
+  // Group local X&Y index
+  int l_tx = get_local_id(0);
+  int l_ty = get_local_id(1);
+
   //
-  float left = in[i_left];
-  float middle = in[i_glob];
-  float right = in[i_right];
+  // Read RGB and convert 2 YCbCr  --> LMEM
+  //
+  // Loop to include border values
+  for(int j = 0; j < 2; j++)
+  {
+    for(int i = 0; i < 2; i++)
+    {
 
-  out[i_glob] = a*left + b*middle + c*right;
+      // First read top left corder (i-1, j-1)
+      int x_idx = g_tx - 1 + j*DIM_X;
+      int y_idx = g_ty - 1 + i*DIM_Y;
+
+      if(   l_tx+j*DIM_X < LMEM_X   // Block border condition X
+          &&l_ty+i*DIM_Y < LMEM_Y   // Block border condition Y
+          )
+      {
+
+        // Check halo (border) values for entire frame,
+        // if outside set to zero
+        bool index_ok = (x_idx >=0 && x_idx < cols) && (y_idx >=0 && y_idx < rows);
+        float R = 0.0f;
+        float G = 0.0f;
+        float B = 0.0f;
+
+        float Y = 0.0f;
+        float Cb = 0.0f;
+        float Cr = 0.0f;
+
+        if( index_ok)
+        {
+          R = g_R[x_idx + y_idx * pitch];
+          G = g_G[x_idx + y_idx * pitch];
+          B = g_B[x_idx + y_idx * pitch];
+        }
+        //
+        // Convert to YCbCr and place in local memory directly
+        d_RGB2YCbCr( R,G,B,
+                    &Y ,
+                    &Cb,
+                    &Cr);
+
+        // All threads write to a unique position in LMEM (no syncing needed)
+        lmem_Y [ l_ty + i*DIM_Y ][ l_tx + j*DIM_X] = Y ;
+        lmem_Cb[ l_ty + i*DIM_Y ][ l_tx + j*DIM_X] = Cb;
+        lmem_Cr[ l_ty + i*DIM_Y ][ l_tx + j*DIM_X] = Cr;
+      }
+    } // END FOR 'i'
+  } // END FOR 'j'
+  //
+  // Synchronize (ensure all threads in work group are done)
+  //
+  barrier(CLK_LOCAL_MEM_FENCE);
+  //
+  // Low pass filter X-direction
+  //
+  // Offset to area of intereens in LMEM (center part)
+  const int offset = 1;
+  // Cb
+  float cb_tl = lmem_Cb[ (l_ty+offset) - 1 ][ (l_tx+offset) - 1];
+  float cb_tm = lmem_Cb[ (l_ty+offset) - 1 ][ (l_tx+offset) ];
+  float cb_tr = lmem_Cb[ (l_ty+offset) - 1 ][ (l_tx+offset) + 1];
+  float cb_ll = lmem_Cb[ l_ty+offset ][ (l_tx+offset) - 1];
+  float cb_mm = lmem_Cb[ l_ty+offset ][ (l_tx+offset) ];
+  float cb_rr = lmem_Cb[ l_ty+offset ][ (l_tx+offset) + 1];
+  float cb_bl = lmem_Cb[ (l_ty+offset) + 1 ][ (l_tx+offset) - 1];
+  float cb_bm = lmem_Cb[ (l_ty+offset) + 1 ][ (l_tx+offset) ];
+  float cb_br = lmem_Cb[ (l_ty+offset) + 1 ][ (l_tx+offset) + 1];
+
+  float low_pass_cb = 0.0f;
+  d_conv(cb_tl, cb_tm, cb_tr, cb_ll, cb_mm, cb_rr, cb_bl, cb_bm, cb_br, &low_pass_cb);
+
+  // Cr
+  float cr_tl = lmem_Cr[ (l_ty+offset) - 1 ][ (l_tx+offset) - 1];
+  float cr_tm = lmem_Cr[ (l_ty+offset) - 1 ][ (l_tx+offset) ];
+  float cr_tr = lmem_Cr[ (l_ty+offset) - 1 ][ (l_tx+offset) + 1];
+  float cr_ll = lmem_Cr[ l_ty+offset ][ (l_tx+offset) - 1];
+  float cr_mm = lmem_Cr[ l_ty+offset ][ (l_tx+offset) ];
+  float cr_rr = lmem_Cr[ l_ty+offset ][ (l_tx+offset) + 1];
+  float cr_bl = lmem_Cr[ (l_ty+offset) + 1 ][ (l_tx+offset) - 1];
+  float cr_bm = lmem_Cr[ (l_ty+offset) + 1 ][ (l_tx+offset) ];
+  float cr_br = lmem_Cr[ (l_ty+offset) + 1 ][ (l_tx+offset) + 1];
+
+  float low_pass_cr = 0.0f;
+  d_conv(cr_tl, cr_tm, cr_tr, cr_ll, cr_mm, cr_rr, cr_bl, cr_bm, cr_br, &low_pass_cr);
+
+  barrier(CLK_LOCAL_MEM_FENCE);
+  lmem_Cr[ (l_ty+offset) ][(l_tx+offset)] = low_pass_cr;
+  lmem_Cb[ (l_ty+offset) ][(l_tx+offset)] = low_pass_cb;
+  // Synchronize for good measure
+  barrier(CLK_LOCAL_MEM_FENCE);
+  // Output result to global memory
+  // Only central portion is area of interest:
+  g_Y[ g_tx + g_ty * pitch ]  = lmem_Y  [ (l_ty+offset) ][(l_tx+offset)];
+  g_Cr[ g_tx + g_ty * pitch ] = lmem_Cr [ (l_ty+offset) ][(l_tx+offset)];
+  g_Cb[ g_tx + g_ty * pitch ] = lmem_Cb [ (l_ty+offset) ][(l_tx+offset)];
 }
 
 //computes the sum of absolute differences between a 16x16 tile and the reference.
-float compute_block_delta(int x_loc, int y_loc, int start_x, int start_y, __local float* refference, __local float* buffer){
+float compute_block_delta(uint x_loc, uint y_loc, __local float* refference, __local float const *buffer){
   float delta = 0;
-  x_loc += start_x;
-  y_loc += start_y;
-  for(int y = 0; y < 16; y++){
-    int y_buf = (y_loc+y)%32;
-    for(int x = 0; x < 16; x++){
-      int x_buf = (x_loc+x)%32;
+  for(uint y = 0; y < 16; y++){
+    uint y_buf = (y_loc+y);
+    for(uint x = 0; x < 16; x++){
+      uint x_buf = (x_loc+x);
       delta += fabs(buffer[x_buf+32*y_buf]-refference[x+16*y]);
     }
   }
@@ -71,12 +169,17 @@ float compute_block_delta(int x_loc, int y_loc, int start_x, int start_y, __loca
 }
 
 //performs bounds checking
-void load_block(int loc_id, int block_x, int block_y, int target_offset_x, int target_offset_y,__global float const *global_source, __local float *local_buffer){
-  block_x = clamp(block_x, (int)0, (int)get_num_groups(0));
-  block_y = clamp(block_y, (int)0, (int)get_num_groups(1));
-  int block_start = 16*(block_x+block_y*get_global_size(0));
-  local_buffer[get_local_id(0)+16*target_offset_x + 32*(get_local_id(1)+16*target_offset_y)]
-    = global_source[block_start+get_local_id(0)+get_local_id(1)*get_global_size(0)];
+void load_block(int glob_id, int block_x, int block_y, __global float const *global_source, __local float *local_buffer){
+  block_x = clamp(block_x, (int)0, (int)get_num_groups(0)-1);
+  block_y = clamp(block_y, (int)0, (int)get_num_groups(1)-1);
+  uint block_start = 16*(block_x+block_y*get_global_size(0));
+  uint loc_adrress = get_local_id(0) + 32*get_local_id(1);
+  uint glob_adress = glob_id;
+  local_buffer[loc_adrress] = global_source[glob_adress];
+  local_buffer[loc_adrress+16] = global_source[glob_adress+16];
+  local_buffer[loc_adrress+00+32*16] = global_source[glob_adress+00+get_global_size(0)*16];
+  local_buffer[loc_adrress+16+32*16] = global_source[glob_adress+16+get_global_size(0)*16];
+  barrier(CLK_LOCAL_MEM_FENCE);
 }
 
 //performs a search over a specific channel and returns a float4 corresponding to the results.
@@ -94,29 +197,19 @@ float4 motionVectorSearch_subroutine(
     float4 score;//each work-item has 4 out of 1024 its responsible for.
     //buffer our reference block into local memorchannel. (4bchanneltes per float, 3 floats per pixel, 256 pixels)
     ref_block[i_loc] = ref_channel[i_glob];
+
     //Buffer the compared blocks
-    //TODO: make one function call.
-    load_block(i_loc, block_x-1, block_y-1, 0, 0, channel, tile_buffer);//0
-    load_block(i_loc, block_x-1, block_y-0, 0, 1, channel, tile_buffer);//1
-    load_block(i_loc, block_x-0, block_y-1, 1, 0, channel, tile_buffer);//2
-    load_block(i_loc, block_x-0, block_y-0, 1, 1, channel, tile_buffer);//3
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[0] = compute_block_delta(x_loc, y_loc, 0,0, ref_block, tile_buffer);
+    load_block(i_glob, block_x-1, block_y-1,channel, tile_buffer);
+    score[0] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
 
-    load_block(i_loc, block_x+1, block_y-1, 0, 0, channel, tile_buffer);//4
-    load_block(i_loc, block_x+1, block_y-0, 0, 1, channel, tile_buffer);//5
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[1] = compute_block_delta(x_loc, y_loc, 16,0, ref_block, tile_buffer);
+    load_block(i_glob, block_x, block_y-1,channel, tile_buffer);
+    score[1] = compute_block_delta(x_loc, y_loc,ref_block, tile_buffer);
 
-    load_block(i_loc, block_x+0, block_y+1, 1, 0, channel, tile_buffer);//6
-    load_block(i_loc, block_x+1, block_y+1, 0, 0, channel, tile_buffer);//7
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[2] = compute_block_delta(x_loc, y_loc, 16,16, ref_block, tile_buffer);
+    load_block(i_glob, block_x-1, block_y,channel, tile_buffer);
+    score[2] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
 
-    load_block(i_loc, block_x-1, block_y+1, 0, 0, channel, tile_buffer);//8
-    load_block(i_loc, block_x-1, block_y-0, 0, 1, channel, tile_buffer);//1
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[3] = compute_block_delta(x_loc, y_loc, 0, 16, ref_block, tile_buffer);
+    load_block(i_glob, block_x, block_y,channel, tile_buffer);
+    score[3] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
 
     return score;
   }
