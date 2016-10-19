@@ -566,7 +566,7 @@ void RunPipelineKernel(unsigned rows, unsigned cols)
     return motion_vectors;
   }
 
-  int encode() {
+  int encode(const char* kernel_name) {
     REPORT_W_COLORS = 1;
     REPORT_W_TIMESTAMPS = 1;
     set_cwdir_to_bin_dir();
@@ -679,7 +679,7 @@ void RunPipelineKernel(unsigned rows, unsigned cols)
     }
 
     char *program_src = NULL;
-    cl_program program = cluProgramFromFilename(context, "../resources/kernels/encoder.cl");
+    cl_program program = cluProgramFromFilename(context, kernel_name);
     ret = clBuildProgram(program, device_count, devices, NULL, NULL, NULL);
     if(CL_SUCCESS != ret){
       report(FAIL, "clBuildProgram returned: %s (%d)", cluErrorString(ret), ret);
@@ -754,10 +754,10 @@ void RunPipelineKernel(unsigned rows, unsigned cols)
         tick(&clock);
         motion_vectors = motionVectorSearch_cl(previous_frame_lowpassed, indices);
         mvs_t[frame_number] = elapsed_since(&clock);
-        vector<mVector>* motion_vectors_old = motionVectorSearch(previous_frame_lowpassed, frame_lowpassed, frame_lowpassed->width, frame_lowpassed->height);
-        for(int i = 0; i < motion_vectors_old->size();i++){
-          report(WARN, "(%d, %d) (%d, %d)", motion_vectors_old->at(i).a, motion_vectors_old->at(i).b,  motion_vectors->at(i).a,  motion_vectors->at(i).b);
-        }
+        // vector<mVector>* motion_vectors_old = motionVectorSearch(previous_frame_lowpassed, frame_lowpassed, frame_lowpassed->width, frame_lowpassed->height);
+        // for(int i = 0; i < motion_vectors_old->size();i++){
+        //   report(WARN, "(%d, %d) (%d, %d)", motion_vectors_old->at(i).a, motion_vectors_old->at(i).b,  motion_vectors->at(i).a,  motion_vectors->at(i).b);
+        // }
         report(INFO, "Compute Delta...");
         tick(&clock);
         frame_lowpassed_final = computeDelta(previous_frame_lowpassed, frame_lowpassed, motion_vectors);
@@ -945,6 +945,6 @@ void RunPipelineKernel(unsigned rows, unsigned cols)
       total_i_t[i] = 1e200;
       total_p_t[i] = 1e200;
     }
-    encode();
+    encode(argv[1]);
     return 0;
   }

@@ -13,5 +13,5 @@ set format y "10^{%L}"
 set xtics nomirror rotate by -45
 set boxwidth 0.75
 set style fill solid
-plot "data/opencl.dat" using 0:2:xtic(1) with boxes
+plot "data/5_encoder_dumb_loc.dat" using 0:2:xtic(1) with boxes
 set output

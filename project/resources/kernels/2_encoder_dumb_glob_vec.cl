@@ -155,31 +155,18 @@ __kernel void RGB2YCbCr_LowPassFilter_pipeline( __global float *g_R,
 }
 
 //computes the sum of absolute differences between a 16x16 tile and the reference.
-float compute_block_delta(uint x_loc, uint y_loc, __local float* refference, __local float const *buffer){
-  float delta = 0;
+float compute_block_delta(uint x_loc, uint y_loc, __local float* refference, __global float const *buffer){
+  float4 delta = {0,0,0,0};
+  uint block_start = get_group_id(0)*16+16*get_group_id(1)*get_global_size(0);
   for(uint y = 0; y < 16; y++){
     uint y_buf = (y_loc+y);
     for(uint x = 0; x < 16; x++){
       uint x_buf = (x_loc+x);
-      delta += fabs(buffer[x_buf+32*y_buf]-refference[x+16*y]);
+      delta += fabs(vload4(block_start+x_buf+get_global_size(0)*y_buf,buffer)-vload4(x+16*y,refference));
+      //delta += fabs(buffer[block_start+x_buf+get_global_size(0)*y_buf]-refference[x+16*y]);
     }
   }
-  barrier(CLK_LOCAL_MEM_FENCE);
-  return delta;
-}
-
-//performs bounds checking
-void load_block(int glob_id, int block_x, int block_y, __global float const *global_source, __local float *local_buffer){
-  block_x = clamp(block_x, (int)0, (int)get_num_groups(0)-1);
-  block_y = clamp(block_y, (int)0, (int)get_num_groups(1)-1);
-  uint block_start = 16*(block_x+block_y*get_global_size(0));
-  uint loc_adrress = get_local_id(0) + 32*get_local_id(1);
-  uint glob_adress = glob_id;
-  local_buffer[loc_adrress] = global_source[glob_adress];
-  local_buffer[loc_adrress+16] = global_source[glob_adress+16];
-  local_buffer[loc_adrress+00+32*16] = global_source[glob_adress+00+get_global_size(0)*16];
-  local_buffer[loc_adrress+16+32*16] = global_source[glob_adress+16+get_global_size(0)*16];
-  barrier(CLK_LOCAL_MEM_FENCE);
+  return delta.x+delta.y+delta.z+delta.w;
 }
 
 //performs a search over a specific channel and returns a float4 corresponding to the results.
@@ -197,19 +184,12 @@ float4 motionVectorSearch_subroutine(
     float4 score;//each work-item has 4 out of 1024 its responsible for.
     //buffer our reference block into local memorchannel. (4bchanneltes per float, 3 floats per pixel, 256 pixels)
     ref_block[i_loc] = ref_channel[i_glob];
-
-    //Buffer the compared blocks
-    load_block(i_glob, block_x-1, block_y-1,channel, tile_buffer);
-    score[0] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
-
-    load_block(i_glob, block_x, block_y-1,channel, tile_buffer);
-    score[1] = compute_block_delta(x_loc, y_loc,ref_block, tile_buffer);
-
-    load_block(i_glob, block_x-1, block_y,channel, tile_buffer);
-    score[2] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
-
-    load_block(i_glob, block_x, block_y,channel, tile_buffer);
-    score[3] = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
+    barrier(CLK_LOCAL_MEM_FENCE);
+    //Buffer t he compared blocks
+    score[0] = compute_block_delta(x_loc, y_loc, ref_block, channel);
+    score[1] = compute_block_delta(x_loc, y_loc,ref_block, channel);
+    score[2] = compute_block_delta(x_loc, y_loc, ref_block, channel);
+    score[3] = compute_block_delta(x_loc, y_loc, ref_block, channel);
 
     return score;
   }
@@ -240,7 +220,6 @@ __kernel void motionVectorSearch(
     score += 0.25f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Cr, ref_Cr, ref_block, tile_buffer);
     score += 0.25f*motionVectorSearch_subroutine(i_glob, stride_glob, x_loc, y_loc, i_loc, Cb, ref_Cb, ref_block, tile_buffer);
 
-    score = score.xywz;
     //find the minimum element of our vector and it's place.
     int my_min_i = (min(score[0], score[1]) <= min(score[2], score[3])) ? (score[1] <= score[0]) : 2+(score[3] <= score[2]);
     float my_min = min(min(score.x, score.y), min(score.z, score.w));

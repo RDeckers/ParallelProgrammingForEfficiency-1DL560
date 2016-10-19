@@ -16,7 +16,11 @@ set style histogram cluster gap 1
 set style fill solid border -1
 set boxwidth 1.0
 #plot '< paste data/opencl.dat data/refference.dat' using 0:2:xtic(1) with boxes
-plot '< paste data/opencl.dat data/refference.dat' using 4:xtic(1) fc rgb "#dd2222" ti "refference", '' u 2 fc rgb "#2222dd" ti "Optimized";
-
+plot '< paste data/*.dat' using 2:xtic(1) fc rgb "#dd2222" ti "refference",\
+ '' u 4 fc rgb "#2222dd" ti "Optimized",\
+ '' u 6 fc rgb "#2222dd" ti "Optimized2",\
+ '' u 8 fc rgb "#2222dd" ti "Optimized2",\
+ '' u 10 fc rgb "#2222dd" ti "Optimized2",\
+ '' u 12 fc rgb "#2222dd" ti "Optimized2";
 
 set output

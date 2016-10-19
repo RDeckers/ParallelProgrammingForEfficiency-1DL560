@@ -34,17 +34,20 @@ BIN_DIR := $(PROJECT_DIR)bin
 SRC_DIR := $(PROJECT_DIR)src
 SCRIPT_DIR := $(PROJECT_DIR)scripts
 PLOTS_DIR := $(PROJECT_DIR)plots
+KERNELS_DIR := $(PROJECT_DIR)resources/kernels
 DATA_DIR := $(PROJECT_DIR)data
 
 PLOTS_GNUPLOT := $(call rwildcard, $(PLOTS_DIR), *.gnuplot)
 PLOTS_PNG := $(patsubst %.gnuplot, %.png, $(PLOTS_GNUPLOT))
 CPP_FILES := $(wildcard $(SRC_DIR)/*.cpp)
+KERNELS := $(wildcard $(KERNELS_DIR)/*.cl)
 SCRIPTS := $(wildcard $(SCRIPT_DIR)/*.sh)
 BINARIES := $(patsubst $(SRC_DIR)/%.cpp,$(BIN_DIR)/%$(BINARY_EXTENSION),$(CPP_FILES))
 
 COMMON_CPP_FILES := $(wildcard $(SRC_DIR)/common/*.cpp)
 OBJ_FILES = $(patsubst $(SRC_DIR)/common/%.cpp,$(OBJ_DIR)/%.o,$(COMMON_CPP_FILES))
-DATA_FILES := $(patsubst $(BIN_DIR)/%$(BINARY_EXTENSION),$(DATA_DIR)/%.dat,$(BINARIES))
+DATA_FILES := $(patsubst $(KERNELS_DIR)/%.cl,$(DATA_DIR)/%.dat,$(KERNELS))
+DATA_FILES += $(DATA_DIR)/0_refference.dat
 
 LD_FLAGS += --std=c++11 -march=native -lOpenCL -lclu -lutilities -lm -ltiff -lxml2 -L $(INSTALL_LIB_DIR)
 CPP_FLAGS += --std=c++11 -g -O2 -pipe -march=native -I $(PROJECT_DIR)headers -I $(INSTALL_INCLUDE_DIR) -I /usr/include/libxml2 -I Z:/msys64/mingw64/include/libxml2/
@@ -61,10 +64,16 @@ plots: $(PLOTS_PNG)
 
 data: $(DATA_FILES)
 
-$(DATA_DIR)/%.dat : $(BIN_DIR)/%$(BINARY_EXTENSION)
+$(DATA_DIR)/0_refference.dat : $(BIN_DIR)/refference$(BINARY_EXTENSION)
 	$(call REPORT,Running $<)
 	$(call CHK_DIR_EXISTS, $(DATA_DIR))
 	$< > $@
+
+$(DATA_DIR)/%.dat : $(BIN_DIR)/opencl$(BINARY_EXTENSION) $(KERNELS_DIR)/%.cl
+	$(call REPORT,Running $<)
+	$(call CHK_DIR_EXISTS, $(DATA_DIR))
+	$< "$(realpath $(patsubst $(DATA_DIR)/%.dat, $(KERNELS_DIR)/%.cl,$@))" > $@
+
 
 $(PLOTS_DIR)/%.png : $(DATA_FILES) $(PLOTS_DIR)/%.gnuplot
 	$(call REPORT,Building $@)
