@@ -22,7 +22,10 @@ plot '< paste data/*.dat' using 2:xtic(1) ti word(titles, 1),\
  '' u 6 ti  word(titles,3),\
  '' u 8 ti  word(titles,4),\
  '' u 10 ti word(titles,5),\
- '' u 12 ti word(titles,6);
+ '' u 12 ti word(titles,6),\
+ '' u 14 ti word(titles,7),\
+ '' u 16 ti word(titles,8),\
+ '' u 18 ti word(titles,9);
 #FILES = system("ls data/*.dat")
 #plot for [data in FILES] data using 2:xtic(1) with boxes fc rgb "#dd2222" ti data;
 
