@@ -1,15 +1,21 @@
 #include "../resources/kernels/common/pipeline_kernels.cl"
 
 //computes the sum of absolute differences between a 16x16 tile and the reference.
-float compute_block_delta(int x_loc, int y_loc, int start_x, int start_y, __local float* refference, __local float* buffer){
-  float delta = 0;
-  x_loc += start_x;
-  y_loc += start_y;
-  for(int y = 0; y < 16; y++){
-    int y_buf = (y_loc+y)%32;
-    for(int x = 0; x < 16; x++){
-      int x_buf = (x_loc+x)%32;
-      delta += fabs(buffer[x_buf+32*y_buf]-refference[x+16*y]);
+float4 compute_block_delta(uint x_loc, uint y_loc, __local float* refference, __local float const *buffer){
+  // uint x_vec_loc = 4*(x_loc/2);//[0,7] //where this wi starts
+  // uint y_vec_loc = y_loc*2+x_loc&1;//[0,31]
+  uint i_loc = x_loc+y_loc*16;//[0, 16x16 = 256 = 2^8]
+  uint x_vec_loc = 4*(i_loc%8);//4*[0,7] -> 28 max, final vec element = 31
+  uint y_vec_loc = (i_loc/8);//2^8/2^3 = 32.
+  //TODO: try mod/rem above to keep pattern 'nicer'
+  float4 delta = {0,0,0,0};
+  for(uint y = 0; y < 16; y++){
+    uint y_buf = y_vec_loc+y;
+    for(uint x = 0; x < 16; x++){
+      uint x_buf = x_vec_loc+x;
+      float4 ref = refference[x+16*y];
+      float4 buff = *((__local float4*)(buffer+x_buf+48*y_buf));
+      delta += fabs(buff-ref);
     }
   }
   barrier(CLK_LOCAL_MEM_FENCE);
@@ -17,12 +23,27 @@ float compute_block_delta(int x_loc, int y_loc, int start_x, int start_y, __loca
 }
 
 //performs bounds checking
-void load_block(int loc_id, int block_x, int block_y, int target_offset_x, int target_offset_y,__global float const *global_source, __local float *local_buffer){
-  int block_start = 16*(block_x+block_y*(get_global_size(0)+32));
-  local_buffer[get_local_id(0)+16*target_offset_x + 32*(get_local_id(1)+16*target_offset_y)]
-    = global_source[block_start+get_local_id(0)+get_local_id(1)*(get_global_size(0)+32)];
+void load_block(uint x_glob, uint y_glob, uint glob_stride, __global float const *global_source, __local float *local_buffer){
+  uint glob_i = x_glob+glob_stride*y_glob;
+  uint i_loc = get_local_id(0)+48*get_local_id(1);
+
+  //row one
+  local_buffer[i_loc+00+48*0] = global_source[glob_i+00+glob_stride*0];
+  local_buffer[i_loc+16+48*0] = global_source[glob_i+16+glob_stride*0];
+  local_buffer[i_loc+32+48*0] = global_source[glob_i+32+glob_stride*0];
+  //row 2
+  local_buffer[i_loc+00+48*16] = global_source[glob_i+00+glob_stride*16];
+  local_buffer[i_loc+16+48*16] = global_source[glob_i+16+glob_stride*16];
+  local_buffer[i_loc+32+48*16] = global_source[glob_i+32+glob_stride*16];
+  //row 3
+  local_buffer[i_loc+00+48*32] = global_source[glob_i+00+glob_stride*32];
+  local_buffer[i_loc+16+48*32] = global_source[glob_i+16+glob_stride*32];
+  local_buffer[i_loc+32+48*32] = global_source[glob_i+32+glob_stride*32];
+  barrier(CLK_LOCAL_MEM_FENCE);
 }
 
+//performs a search over a specific channel and returns a float4 corresponding to the results.
+//TODO: have each WG proccess a row instead of one tile. reduces global memory 'waste ratio'.
 float4 motionVectorSearch_subroutine(
   uint x_glob, uint y_glob, uint i_glob, uint stride_glob,
   uint x_loc, uint y_loc, uint i_loc,
@@ -30,37 +51,16 @@ float4 motionVectorSearch_subroutine(
   __local float *ref_block, //The buffer block for our old reference array.
   __local float *tile_buffer //buffers for our tiles
   ){
-    int block_x = get_group_id(0)+1;
-    int block_y = get_group_id(1)+1;
     float4 score;//each work-item has 4 out of 1024 its responsible for.
     //buffer our reference block into local memorchannel. (4bchanneltes per float, 3 floats per pixel, 256 pixels)
     ref_block[i_loc] = ref_channel[i_glob];
+
     //Buffer the compared blocks
-    //TODO: make one function call.
-    load_block(i_loc, block_x-1, block_y-1, 0, 0, channel, tile_buffer);//0
-    load_block(i_loc, block_x-1, block_y-0, 0, 1, channel, tile_buffer);//1
-    load_block(i_loc, block_x-0, block_y-1, 1, 0, channel, tile_buffer);//2
-    load_block(i_loc, block_x-0, block_y-0, 1, 1, channel, tile_buffer);//3
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[0] = compute_block_delta(x_loc, y_loc, 0,0, ref_block, tile_buffer);
-
-    load_block(i_loc, block_x+1, block_y-1, 0, 0, channel, tile_buffer);//4
-    load_block(i_loc, block_x+1, block_y-0, 0, 1, channel, tile_buffer);//5
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[1] = compute_block_delta(x_loc, y_loc, 16,0, ref_block, tile_buffer);
-
-    load_block(i_loc, block_x+0, block_y+1, 1, 0, channel, tile_buffer);//6
-    load_block(i_loc, block_x+1, block_y+1, 0, 0, channel, tile_buffer);//7
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[3] = compute_block_delta(x_loc, y_loc, 16,16, ref_block, tile_buffer);
-
-    load_block(i_loc, block_x-1, block_y+1, 0, 0, channel, tile_buffer);//8
-    load_block(i_loc, block_x-1, block_y-0, 0, 1, channel, tile_buffer);//1
-    barrier(CLK_LOCAL_MEM_FENCE);
-    score[2] = compute_block_delta(x_loc, y_loc, 0, 16, ref_block, tile_buffer);
+    load_block(x_glob-16, y_glob -16, stride_glob, channel, tile_buffer);
+    score = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
 
     return score;
-}
+  }
 
 __kernel void motionVectorSearch(
     __global float const *ref_Y, __global float const *ref_Cb, __global float const *ref_Cr,//the channels of our new frame
@@ -68,7 +68,8 @@ __kernel void motionVectorSearch(
     __global int *indices
   ){
     __local float ref_block[16*16];
-    __local float tile_buffer[32*32];
+    __local float tile_buffer[48*48];
+    //10KiB total ^
     //TODO: verify
     // Get the index of the current element to be processed
     int x_glob = get_global_id(0)+16;//no borders,
@@ -97,7 +98,10 @@ __kernel void motionVectorSearch(
     //should be [-16,15]
     //reshift to [0,32]x[0,32] and flatten
     //conver back to proper coordinates on cpu.
-    int my_index = (x_loc+16*(my_min_i&1))+32*(y_loc+8*(my_min_i&2));
+    //uint i_loc = x_loc+y_loc*16;
+    uint x_vec_loc = 4*(i_loc%8);
+    uint y_vec_loc = (i_loc/8);
+    int my_index = (x_vec_loc+my_min_i)+32*(y_vec_loc);
 
     ref_block[i_loc] = my_min;//reuse the ref_block for storing our minimum values, then reduce in local memory to get actual minium
     index_buffer[i_loc] = my_index;//reuse the tile_buffer_1 as an interger storage for the index.
@@ -119,7 +123,7 @@ __kernel void motionVectorSearch(
       barrier(CLK_LOCAL_MEM_FENCE);//barrier outside if so everyone hits it.
     }
     //now the first work-item will have computed the minium.
-    if(i_loc == 0){
+    if(i_loc ==0){
       int group_id = get_group_id(0)+get_group_id(1)*get_num_groups(0);
       indices[group_id] = my_index;
     }
