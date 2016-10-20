@@ -1,5 +1,5 @@
 #include "../resources/kernels/common/pipeline_kernels.cl"
-
+#define FP_CONTRACT ON
 //computes the sum of absolute differences between a 16x16 tile and the reference.
 float4 compute_block_delta(uint x_loc, uint y_loc, __local float* refference, __local float const *buffer){
   // uint x_vec_loc = 4*(x_loc/2);//[0,7] //where this wi starts
@@ -7,9 +7,10 @@ float4 compute_block_delta(uint x_loc, uint y_loc, __local float* refference, __
   uint i_loc = x_loc+y_loc*16;//[0, 16x16 = 256 = 2^8]
   uint x_vec_loc = (i_loc%8);//4*[0,7] -> 28 max, final vec element = 31
   uint y_vec_loc = (i_loc/8);//2^8/2^3 = 32.
-  //TODO: try mod/rem above to keep pattern 'nicer'
   float4 delta = {0,0,0,0};
   for(uint y = 0; y < 16; y++){
+    const uint A = 0;
+    const uint B = 0xFFFFFFFF;
     uint y_buf = y_vec_loc+y;
     float4 buffed_vec[5] = {
       vload4(x_vec_loc+12*y_buf+0, (__local float*)buffer),
@@ -18,14 +19,45 @@ float4 compute_block_delta(uint x_loc, uint y_loc, __local float* refference, __
       vload4(x_vec_loc+12*y_buf+3, (__local float*)buffer),
       vload4(x_vec_loc+12*y_buf+4, (__local float*)buffer),
     };
-    for(uint xb = 0; xb < 4; xb++){
-      float4 a = buffed_vec[xb+0];
-      float4 b = buffed_vec[xb+1];
-      delta += fabs(select(a.xyzw, b.xyzw, (uint4)(0x00000000,0x00000000,0x00000000,0x00000000)) - refference[4*xb+0+16*y]);
-      delta += fabs(select(a.yzwx, b.yzwx, (uint4)(0x00000000,0x00000000,0x00000000,0xFFFFFFFF)) - refference[4*xb+1+16*y]);
-      delta += fabs(select(a.zwxy, b.zwxy, (uint4)(0x00000000,0x00000000,0xFFFFFFFF,0xFFFFFFFF)) - refference[4*xb+2+16*y]);
-      delta += fabs(select(a.wxyz, b.wxyz, (uint4)(0x00000000,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF)) - refference[4*xb+3+16*y]);
-    }
+    //top of blocks
+    delta += (fabs(buffed_vec[0]-refference[ 0+16*y])//3 ops, 1 bc
+             +fabs(buffed_vec[1]-refference[ 4+16*y]))
+             +(fabs(buffed_vec[2]-refference[ 8+16*y])
+             +fabs(buffed_vec[3]-refference[12+16*y]));
+
+    buffed_vec[0] = buffed_vec[0].yzwx; //rotate left //1 op?
+    buffed_vec[1] = buffed_vec[1].yzwx; //rotate left
+    buffed_vec[2] = buffed_vec[2].yzwx; //rotate left
+    buffed_vec[3] = buffed_vec[3].yzwx; //rotate left
+    buffed_vec[4] = buffed_vec[4].yzwx; //rotate left
+    //second row of each block
+    delta += (fabs(select(buffed_vec[0], buffed_vec[1], (uint4)(A,A,A,B))-refference[1+ 0+16*y])//4 ops, 1bc?
+            +fabs(select(buffed_vec[1], buffed_vec[2], (uint4)(A,A,A,B))-refference[1+ 4+16*y]))
+            +(fabs(select(buffed_vec[2], buffed_vec[3], (uint4)(A,A,A,B))-refference[1+ 8+16*y])
+            +fabs(select(buffed_vec[3], buffed_vec[4], (uint4)(A,A,A,B))-refference[1+12+16*y]));
+
+    buffed_vec[0] = buffed_vec[0].yzwx; //rotate left
+    buffed_vec[1] = buffed_vec[1].yzwx; //rotate left
+    buffed_vec[2] = buffed_vec[2].yzwx; //rotate left
+    buffed_vec[3] = buffed_vec[3].yzwx; //rotate left
+    buffed_vec[4] = buffed_vec[4].yzwx; //rotate left
+    //third row
+    delta += (fabs(select(buffed_vec[0], buffed_vec[1], (uint4)(A,A,B,B))-refference[2+ 0+16*y])
+            +fabs(select(buffed_vec[1], buffed_vec[2], (uint4)(A,A,B,B))-refference[2+ 4+16*y]))
+            +(fabs(select(buffed_vec[2], buffed_vec[3], (uint4)(A,A,B,B))-refference[2+ 8+16*y])
+            +fabs(select(buffed_vec[3], buffed_vec[4], (uint4)(A,A,B,B))-refference[2+12+16*y]));
+
+    buffed_vec[0] = buffed_vec[0].yzwx; //rotate left
+    buffed_vec[1] = buffed_vec[1].yzwx; //rotate left
+    buffed_vec[2] = buffed_vec[2].yzwx; //rotate left
+    buffed_vec[3] = buffed_vec[3].yzwx; //rotate left
+    buffed_vec[4] = buffed_vec[4].yzwx; //rotate left
+    //fourth
+    delta += (fabs(select(buffed_vec[0], buffed_vec[1], (uint4)(A,B,B,B))-refference[3+ 0+16*y])
+             +fabs(select(buffed_vec[1], buffed_vec[2], (uint4)(A,B,B,B))-refference[3+ 4+16*y]))
+             +(fabs(select(buffed_vec[2], buffed_vec[3], (uint4)(A,B,B,B))-refference[3+ 8+16*y])
+             +fabs(select(buffed_vec[3], buffed_vec[4], (uint4)(A,B,B,B))-refference[3+12+16*y]));
+
   }
   barrier(CLK_LOCAL_MEM_FENCE);
   return delta;
@@ -67,7 +99,10 @@ float4 motionVectorSearch_subroutine(
     //Buffer the compared blocks
     load_block(x_glob-16, y_glob -16, stride_glob, channel, tile_buffer);
     score = compute_block_delta(x_loc, y_loc, ref_block, tile_buffer);
-
+    //TODO: split in columns,
+    //shift local buffer by one each time to reduce global memory usage.
+    //now loads 1+9 tiles.
+    //assymptoptically goes to 4 tiles per frame. (adding one means load 3 more tiles from glob + new ref)
     return score;
   }
 
@@ -81,16 +116,16 @@ __kernel void motionVectorSearch(
     //10KiB total ^
     //TODO: verify
     // Get the index of the current element to be processed
-    int x_glob = get_global_id(0)+16;//no borders,
-    int y_glob = get_global_id(1)+16;//so shift by 16.
-    int stride_glob = get_global_size(0)+32;//we also have to jump an additional 16 places on each side.
-    int i_glob = x_glob+y_glob*stride_glob;//our index in global memory
+    uint x_glob = get_global_id(0)+16;//no borders,
+    uint y_glob = get_global_id(1)+16;//so shift by 16.
+    uint stride_glob = get_global_size(0)+32;//we also have to jump an additional 16 places on each side.
+    uint i_glob = x_glob+y_glob*stride_glob;//our index in global memory
 
     //Get the local index
-    int x_loc = get_local_id(0);
-    int y_loc = get_local_id(1);
-    int stride_loc = get_local_size(0);
-    int i_loc = x_loc+y_loc*stride_loc;
+    uint x_loc = get_local_id(0);
+    uint y_loc = get_local_id(1);
+    uint stride_loc = get_local_size(0);
+    uint i_loc = x_loc+y_loc*stride_loc;
 
     float4 score = {0,0,0,0};//score here tracks which offset gives the best motion vector, lower is better.
 
@@ -99,7 +134,7 @@ __kernel void motionVectorSearch(
     score += 0.25f*motionVectorSearch_subroutine(x_glob, y_glob, i_glob, stride_glob, x_loc, y_loc, i_loc, Cb, ref_Cb, ref_block, tile_buffer);
 
     //find the minimum element of our vector and it's place.
-    int my_min_i = (min(score[0], score[1]) <= min(score[2], score[3])) ? (score[1] <= score[0]) : 2+(score[3] <= score[2]);
+    uint my_min_i = (min(score[0], score[1]) <= min(score[2], score[3])) ? (score[1] <= score[0]) : 2+(score[3] <= score[2]);
     float my_min = min(min(score.x, score.y), min(score.z, score.w));
 
     //reuse one of the buffers as an index buffer
@@ -123,7 +158,7 @@ __kernel void motionVectorSearch(
         float my_new = ref_block[i_loc+participants];
         int my_new_index = index_buffer[i_loc+participants];
         //no barrier needed here, because all the writes in this section are not read until the next one.
-        int selection_mask = my_min < my_new;
+        uint selection_mask = my_min < my_new;
         my_min = select(my_new, my_min, selection_mask);
         my_index = select(my_new_index, my_index, selection_mask);
         ref_block[i_loc] = my_min;
@@ -133,7 +168,7 @@ __kernel void motionVectorSearch(
     }
     //now the first work-item will have computed the minium.
     if(i_loc ==0){
-      int group_id = get_group_id(0)+get_group_id(1)*get_num_groups(0);
+      uint group_id = get_group_id(0)+get_group_id(1)*get_num_groups(0);
       indices[group_id] = my_index;
     }
 }
