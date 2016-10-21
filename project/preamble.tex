@@ -1,0 +1,46 @@
+\documentclass[leqno,a4paper]{article}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[english]{babel}
+\linespread{1.25} %easier reading/grading.
+\usepackage{amsmath} %d'oh
+\usepackage{amsfonts}
+\usepackage{graphicx}
+\usepackage{bold-extra} %for \mb
+\usepackage[margin=2.5cm]{geometry} %for custom margins
+\usepackage{enumerate} %for special counters
+\usepackage{titlesec} %for section numbering
+\usepackage{ifthen}
+\renewcommand\thesubsection{\alph{subsection}}
+\titleformat{\section}{\it \bf \large}{{\normalfont  \bf \thesection.}}{4pt}{}[]
+\titleformat{\subsection}{\it \bf \large}{{\normalfont \bf \quad \large  \thesection \thesubsection)}}{5pt}{}[]
+\titleformat{\subsubsection}{\bf \it}{\qquad}{5pt}{}[]
+
+\numberwithin{equation}{section}
+\newcommand\norm[1]{\left\lVert#1\right\rVert} %http://tex.stackexchange.com/questions/107186/how-to-write-norm-which-adjusts-its-size
+\renewcommand{\O}{\mathcal{O}}
+\renewcommand{\bf}{\bfseries}
+\renewcommand{\sc}{\scshape}
+\renewcommand{\it}{\itshape}
+\renewcommand{\div}{\text{div }}
+\renewcommand{\Re}{\mathbb{R}}
+\newcommand{\op}{\left(}
+\newcommand{\cp}{\right)}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\mb}{\mathbf}
+\newcommand{\nn}{\\\nonumber}
+\newcommand{\curl}{\text{curl }}
+\newcommand{\inp}[2]{\left<#1, #2\right>}
+\renewcommand{\d}[1]{\,\text{d}#1}
+\newcommand{\pdrv}[2][x]{\frac{\partial #2}{\partial #1}}
+\newcommand{\drv}[2][x]{\frac{\text{d} #2}{\text{d} #1}}
+\renewcommand{\maketitle}[2][]{\begin{center}
+{{\bf \huge \sc #2\\
+\ifthenelse{\equal{#1}{}}{}{{\vspace{-12pt} \Large #1}\\\vspace{5pt}}
+\large Group 7\\Jin Wen Ting, Roel Deckers}}
+\vspace{-1. cm}\rule[2.5 cm]{16 cm}{1 pt}
+\vspace{-2.5 cm}
+\end{center}}

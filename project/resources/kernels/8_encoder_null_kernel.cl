@@ -20,57 +20,25 @@ float4 compute_block_delta(uint x_loc, uint y_loc, __local float* refference, __
       vload4(x_vec_loc+12*y_buf+4, (__local float*)buffer),
     };
     //top of blocks
-    delta += (buffed_vec[0]-refference[ 0+16*y]);//3 ops, 1 bc
-    delta += (buffed_vec[1]-refference[ 4+16*y]);
-    delta += (buffed_vec[2]-refference[ 8+16*y]);
-    delta += (buffed_vec[3]-refference[12+16*y]);
+    delta += refference[ 0+16*y];//3 ops, 1 bc
+    delta += refference[ 4+16*y];
+    delta += refference[ 8+16*y];
+    delta += refference[12+16*y];
 
-    buffed_vec[0] = buffed_vec[0].yzwx; //rotate left //1 op?
-    buffed_vec[1] = buffed_vec[1].yzwx; //rotate left
-    buffed_vec[2] = buffed_vec[2].yzwx; //rotate left
-    buffed_vec[3] = buffed_vec[3].yzwx; //rotate left
-    buffed_vec[4] = buffed_vec[4].yzwx; //rotate left
+    delta += refference[ 0+16*y];//3 ops, 1 bc
+    delta += refference[ 4+16*y];
+    delta += refference[ 8+16*y];
+    delta += refference[12+16*y];
 
-    delta += (buffed_vec[0]-refference[ 0+16*y]);//3 ops, 1 bc
-    delta += (buffed_vec[1]-refference[ 4+16*y]);
-    delta += (buffed_vec[2]-refference[ 8+16*y]);
-    delta += (buffed_vec[3]-refference[12+16*y]);
-    // //second row of each block
-    // delta += (select(buffed_vec[0], buffed_vec[1], (uint4)(A,A,A,B))-refference[1+ 0+16*y]);//4 ops, 1bc?
-    // delta += (select(buffed_vec[1], buffed_vec[2], (uint4)(A,A,A,B))-refference[1+ 4+16*y]);
-    // delta += (select(buffed_vec[2], buffed_vec[3], (uint4)(A,A,A,B))-refference[1+ 8+16*y]);
-    // delta += (select(buffed_vec[3], buffed_vec[4], (uint4)(A,A,A,B))-refference[1+12+16*y]);
+    delta += refference[ 0+16*y];//3 ops, 1 bc
+    delta += refference[ 4+16*y];
+    delta += refference[ 8+16*y];
+    delta += refference[12+16*y];
 
-    buffed_vec[0] = buffed_vec[0].yzwx; //rotate left
-    buffed_vec[1] = buffed_vec[1].yzwx; //rotate left
-    buffed_vec[2] = buffed_vec[2].yzwx; //rotate left
-    buffed_vec[3] = buffed_vec[3].yzwx; //rotate left
-    buffed_vec[4] = buffed_vec[4].yzwx; //rotate left
-    //third row
-    delta += (buffed_vec[0]-refference[ 0+16*y]);//3 ops, 1 bc
-    delta += (buffed_vec[1]-refference[ 4+16*y]);
-    delta += (buffed_vec[2]-refference[ 8+16*y]);
-    delta += (buffed_vec[3]-refference[12+16*y]);
-    // delta += (select(buffed_vec[0], buffed_vec[1], (uint4)(A,A,B,B))-refference[2+ 0+16*y]);
-    // delta += (select(buffed_vec[1], buffed_vec[2], (uint4)(A,A,B,B))-refference[2+ 4+16*y]);
-    // delta += (select(buffed_vec[2], buffed_vec[3], (uint4)(A,A,B,B))-refference[2+ 8+16*y]);
-    // delta += (select(buffed_vec[3], buffed_vec[4], (uint4)(A,A,B,B))-refference[2+12+16*y]);
-
-    buffed_vec[0] = buffed_vec[0].yzwx; //rotate left
-    buffed_vec[1] = buffed_vec[1].yzwx; //rotate left
-    buffed_vec[2] = buffed_vec[2].yzwx; //rotate left
-    buffed_vec[3] = buffed_vec[3].yzwx; //rotate left
-    buffed_vec[4] = buffed_vec[4].yzwx; //rotate left
-    //fourth
-    delta += (buffed_vec[0]-refference[ 0+16*y]);//3 ops, 1 bc
-    delta += (buffed_vec[1]-refference[ 4+16*y]);
-    delta += (buffed_vec[2]-refference[ 8+16*y]);
-    delta += (buffed_vec[3]-refference[12+16*y]);
-    // delta += (select(buffed_vec[0], buffed_vec[1], (uint4)(A,B,B,B))-refference[3+ 0+16*y]);
-    // delta += (select(buffed_vec[1], buffed_vec[2], (uint4)(A,B,B,B))-refference[3+ 4+16*y]);
-    // delta += (select(buffed_vec[2], buffed_vec[3], (uint4)(A,B,B,B))-refference[3+ 8+16*y]);
-    // delta += (select(buffed_vec[3], buffed_vec[4], (uint4)(A,B,B,B))-refference[3+12+16*y]);
-
+    delta += refference[ 0+16*y];//3 ops, 1 bc
+    delta += refference[ 4+16*y];
+    delta += refference[ 8+16*y];
+    delta += refference[12+16*y];
   }
   barrier(CLK_LOCAL_MEM_FENCE);
   return delta;

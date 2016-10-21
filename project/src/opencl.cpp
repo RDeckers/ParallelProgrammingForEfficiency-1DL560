@@ -17,7 +17,7 @@
 #include <utilities/benchmarking.h>
 #include <algorithm>
 
-#include "../resources/kernels/PipeLineConstants.h"
+#include "../resources/kernels/common/PipeLineConstants.h"
 
 using namespace std;
 
@@ -179,6 +179,8 @@ std::vector<mVector>* motionVectorSearch_cl(Frame* in, int32_t *indices){
   //run the kernel
 
 
+  work_dim[0] -= 32;
+  work_dim[1] -= 32;
   work_item_dim[0] = work_item_dim[1] = 16;
   if(CL_SUCCESS != (ret = clEnqueueNDRangeKernel(com_qs[0], kernel_mvs, 2, NULL, work_dim, work_item_dim, 0, NULL, NULL))){
         report(FAIL, "enqueue kernel (mvs) returned: %s (%d)",cluErrorString(ret), ret);
@@ -195,17 +197,18 @@ std::vector<mVector>* motionVectorSearch_cl(Frame* in, int32_t *indices){
   clFinish(com_qs[0]);
 
   //report(INFO,"there are %d groups", num_groups);
-  for(int x = 1; x < work_dim[1]/work_item_dim[1]-1; x++){
-    for(int y = 1; y < work_dim[0]/work_item_dim[0]-1; y++){
-      int i = x + y*(work_dim[0]/work_item_dim[0]);
+  for(int x =0; x < work_dim[1]/work_item_dim[1]; x++)
+  for(int y = 0; y < work_dim[0]/work_item_dim[0]; y++){
+    int i = x+y*work_dim[1]/work_item_dim[1];
+  //for(int i = 0; i < num_groups; i++){
       int index = indices[i];
+      //report(INFO, "%d -> %d", i, index);
       int offset_y = (index%32)-16;
       int offset_x = (index/32)-16;
       mVector v;
       v.a=offset_x;
       v.b=offset_y;
       motion_vectors->push_back(v);
-    }
   }
   return motion_vectors;
 }
@@ -493,7 +496,7 @@ void RunPipelineKernel(unsigned rows, unsigned cols)
   work_item_dim[1] = DIM_Y; // ex 8
   work_dim[0] = cols;   // x-direction
   work_dim[1] = rows;
-  report(INFO, "trying to run kernel with [%u, %u] and [%u, %u]", DIM_X, DIM_Y, cols, rows);
+  //report(INFO, "trying to run kernel with [%u, %u] and [%u, %u]", DIM_X, DIM_Y, cols, rows);
   //enque the kernel
   cl_int ret;
   ErrorCheck(clSetKernelArg(pipeline_kernel, 3, sizeof(cl_mem), (void *)&mem_Y[frame_number&1]) );
@@ -680,7 +683,7 @@ void RunPipelineKernel(unsigned rows, unsigned cols)
 
     char *program_src = NULL;
     cl_program program = cluProgramFromFilename(context, kernel_name);
-    ret = clBuildProgram(program, device_count, devices, NULL, NULL, NULL);
+    ret = clBuildProgram(program, device_count, devices, "-cl-unsafe-math-optimizations -cl-denorms-are-zero -cl-no-signed-zeros -cl-finite-math-only -cl-fast-relaxed-math -cl-strict-aliasing", NULL, NULL);
     if(CL_SUCCESS != ret){
       report(FAIL, "clBuildProgram returned: %s (%d)", cluErrorString(ret), ret);
     }
@@ -749,7 +752,7 @@ void RunPipelineKernel(unsigned rows, unsigned cols)
         // Note that in the first iteration we don't enter this branch!
 
         //Compute the motion vectors
-        report(INFO, "Motion Vector Search...");
+        // report(INFO, "Motion Vector Search...");
 
         tick(&clock);
         motion_vectors = motionVectorSearch_cl(previous_frame_lowpassed, indices);

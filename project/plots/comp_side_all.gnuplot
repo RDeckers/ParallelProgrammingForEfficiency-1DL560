@@ -5,7 +5,7 @@ set output output_file
 #set key right top;
 #set format x "2^{%L}"
 set ylabel "runtime (ns)"
-set yrange [0:7.5*10**8]
+#set yrange [0:7.5*10**8]
 #set xlabel "Image dimensions (width & height)"
 set grid xtics ytics;
 #set logscale y;
@@ -15,17 +15,11 @@ set style data histogram
 set style histogram cluster gap 1
 set style fill solid border -1
 set boxwidth 1.0
+set xrange [0.5:12.5];
 #plot '< paste data/opencl.dat data/refference.dat' using 0:2:xtic(1) with boxes
 plot\
   'data/0_refference.dat' using 2:xtic(1) ti "Refference",\
-  'data/1_encoder_smart.dat' u 2 ti "Looping Tiles",\
-  'data/2_encoder_dumb_glob_vec.dat' u 2 ti "Global vectorized",\
-  'data/3_encoder_dumb_glob.dat' u 2 ti "Global Scalar",\
-  'data/4_encoder_dumb_loc_vec.dat' u 2 ti "Local vectorized 1",\
-  'data/5_encoder_dumb_loc.dat' u 2 ti "Local Scalar",\
-  'data/6_encoder_dumb_loc_vec2.dat' u 2 ti "Local vectorized 2",\
-  'data/7_encoder_dumb_loc_vec3.dat' u 2 ti "Local vectorized 3",\
-  'data/8_encoder_null_kernel.dat' u 2 ti "Null";
+  'data/7_encoder_dumb_loc_vec3.dat' u 2 ti "Optimized";
 
 #titles = system('ls data/*.dat')
 #plot '< paste data/*.dat' using 2:xtic(1) ti word(titles, 1),\
